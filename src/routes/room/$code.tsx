@@ -241,6 +241,10 @@ function RoomPage() {
         const b = payload as BoomFx;
         boomsRef.current.push({ ...b, born: performance.now() });
       })
+      .on("broadcast", { event: "despawn" }, ({ payload }) => {
+        const ids = new Set((payload as { ids: string[] }).ids);
+        projectilesRef.current = projectilesRef.current.filter((p) => !ids.has(p.id));
+      })
       .on("broadcast", { event: "hit" }, ({ payload }) => {
         const { target, by, dmg, weapon } = payload as {
           target: string; by: string; dmg: number; weapon: WeaponId;
@@ -484,6 +488,9 @@ function RoomPage() {
           }
           if (hit) {
             explode(b);
+            channelRef.current?.send({
+              type: "broadcast", event: "despawn", payload: { ids: [b.id] },
+            });
             continue;
           }
         }
