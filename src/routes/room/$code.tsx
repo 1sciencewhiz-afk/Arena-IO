@@ -342,7 +342,7 @@ function RoomPage() {
       lastFireRef.current.sniper = t;
       const chargedMs = chargeStartRef.current ? now - chargeStartRef.current : 0;
       const chargeRatio = Math.min(1, chargedMs / ((w.charge ?? 0.6) * 1000));
-      const ang = Math.atan2(mouseRef.current.y - self.y, mouseRef.current.x - self.x);
+      const ang = currentAimAngle(self);
       const dmg = w.dmg * (0.4 + 0.6 * chargeRatio) * dmgMult(self.upgrades);
       const p: Projectile = {
         id: `${me.id}-s-${now}`,
