@@ -4,6 +4,8 @@ import { supabase } from "@/integrations/supabase/client";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { announceRoom } from "@/lib/arena/lobby";
+import { TouchControls } from "@/components/arena/TouchControls";
+import { HowToPlayContent } from "@/components/arena/HowToPlayContent";
 import {
   WEAPONS,
   WEAPON_ORDER,
@@ -81,6 +83,16 @@ function RoomPage() {
   const [hpUi, setHpUi] = useState({ hp: 100, max: 100 });
   const [pointsUi, setPointsUi] = useState(0);
   const [upgradesUi, setUpgradesUi] = useState<Upgrades>({ ...ZERO_UPGRADES });
+  const [isTouch, setIsTouch] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const touchCapable =
+      "ontouchstart" in window ||
+      ((navigator as Navigator & { maxTouchPoints?: number }).maxTouchPoints ?? 0) > 0;
+    setIsTouch(touchCapable && window.matchMedia("(pointer: coarse)").matches);
+  }, []);
 
   const roomName = useMemo(() => {
     if (typeof window === "undefined") return code;
@@ -113,6 +125,19 @@ function RoomPage() {
   const chargeStartRef = useRef<number | null>(null);
   const pointsRef = useRef(0);
   const upgradesRef = useRef<Upgrades>({ ...ZERO_UPGRADES });
+
+  // Unified input refs (filled by mouse/keyboard or touch overlay)
+  const moveVecRef = useRef<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
+  const aimVecRef = useRef<{ dx: number; dy: number } | null>(null);
+  const fireRef = useRef(false);
+  const controlsApiRef = useRef<{
+    setMove: (v: { dx: number; dy: number }) => void;
+    setAim: (v: { dx: number; dy: number } | null) => void;
+    fireDown: () => void;
+    fireUp: () => void;
+    melee: () => void;
+    selectWeapon: (w: WeaponId) => void;
+  } | null>(null);
 
   useEffect(() => {
     const me: Player = {
