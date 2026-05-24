@@ -908,6 +908,36 @@ function RoomPage() {
           </aside>
         </div>
       </div>
+
+      {isTouch && controlsApiRef.current && (
+        <TouchControls
+          weapon={weaponUi}
+          onMove={(v) => controlsApiRef.current?.setMove(v)}
+          onAim={(v) => controlsApiRef.current?.setAim(v)}
+          onFireDown={() => controlsApiRef.current?.fireDown()}
+          onFireUp={() => controlsApiRef.current?.fireUp()}
+          onMelee={() => controlsApiRef.current?.melee()}
+          onSelectWeapon={(w) => controlsApiRef.current?.selectWeapon(w)}
+        />
+      )}
+
+      {showHelp && (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-background/80 p-4 backdrop-blur"
+          onClick={() => setShowHelp(false)}
+        >
+          <div
+            className="my-8 w-full max-w-2xl rounded-2xl border border-foreground/10 bg-background p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-xl font-black">How to play</h2>
+              <Button size="sm" variant="ghost" onClick={() => setShowHelp(false)}>Close</Button>
+            </div>
+            <HowToPlayContent />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
