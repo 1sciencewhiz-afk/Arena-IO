@@ -362,10 +362,53 @@ function RoomPage() {
       channelRef.current?.send({ type: "broadcast", event: "fire", payload: { projectiles: [p] } });
     }
 
+    function currentAimAngle(self: Player): number {
+      const v = aimVecRef.current;
+      if (v && (v.dx !== 0 || v.dy !== 0)) return Math.atan2(v.dy, v.dx);
+      return Math.atan2(mouseRef.current.y - self.y, mouseRef.current.x - self.x);
+    }
+
+    function swingMelee(now: number) {
+      const self = playersRef.current.get(me.id);
+      if (!self || self.hp <= 0) return;
+      const w = WEAPONS.sword;
+      const t = now / 1000;
+      const cd = w.cooldown * cooldownMult(self.upgrades);
+      if (t - lastFireRef.current.sword < cd) return;
+      lastFireRef.current.sword = t;
+      const ang = currentAimAngle(self);
+      const dmgScale = dmgMult(self.upgrades);
+      const swing: SwingFx = {
+        x: self.x, y: self.y, ang, range: w.melee!.range, arc: w.melee!.arc,
+        born: now, color: self.color,
+      };
+      swingsRef.current.push(swing);
+      channelRef.current?.send({ type: "broadcast", event: "swing", payload: swing });
+      for (const other of playersRef.current.values()) {
+        if (other.id === me.id || other.hp <= 0) continue;
+        const dx = other.x - self.x;
+        const dy = other.y - self.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > w.melee!.range + PLAYER_R) continue;
+        const a = Math.atan2(dy, dx);
+        let diff = a - ang;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        if (Math.abs(diff) <= w.melee!.arc / 2) {
+          const dmg = w.dmg * dmgScale;
+          applyDamage(other.id, me.id, dmg, "sword");
+          channelRef.current?.send({
+            type: "broadcast", event: "hit",
+            payload: { target: other.id, by: me.id, dmg, weapon: "sword" },
+          });
+        }
+      }
+    }
+
     function tryFire(now: number) {
       const self = playersRef.current.get(me.id);
       if (!self || self.hp <= 0) return;
-      if (!mouseRef.current.down) return;
+      if (!fireRef.current) return;
       const w = WEAPONS[weaponRef.current];
       const t = now / 1000;
       const cd = w.cooldown * cooldownMult(self.upgrades);
@@ -375,36 +418,12 @@ function RoomPage() {
       if (w.id === "sniper") return;
 
       lastFireRef.current[w.id] = t;
-      const ang = Math.atan2(mouseRef.current.y - self.y, mouseRef.current.x - self.x);
+      const ang = currentAimAngle(self);
       const dmgScale = dmgMult(self.upgrades);
 
       if (w.melee) {
-        // Sword: instant arc check, broadcast swing fx, broadcast hits authoritatively
-        const swing: SwingFx = {
-          x: self.x, y: self.y, ang, range: w.melee.range, arc: w.melee.arc,
-          born: now, color: self.color,
-        };
-        swingsRef.current.push(swing);
-        channelRef.current?.send({ type: "broadcast", event: "swing", payload: swing });
-        for (const other of playersRef.current.values()) {
-          if (other.id === me.id || other.hp <= 0) continue;
-          const dx = other.x - self.x;
-          const dy = other.y - self.y;
-          const dist = Math.hypot(dx, dy);
-          if (dist > w.melee.range + PLAYER_R) continue;
-          const a = Math.atan2(dy, dx);
-          let diff = a - ang;
-          while (diff > Math.PI) diff -= Math.PI * 2;
-          while (diff < -Math.PI) diff += Math.PI * 2;
-          if (Math.abs(diff) <= w.melee.arc / 2) {
-            const dmg = w.dmg * dmgScale;
-            applyDamage(other.id, me.id, dmg, "sword");
-            channelRef.current?.send({
-              type: "broadcast", event: "hit",
-              payload: { target: other.id, by: me.id, dmg, weapon: "sword" },
-            });
-          }
-        }
+        swingMelee(now);
+        void ang;
         return;
       }
 
