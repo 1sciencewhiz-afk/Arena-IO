@@ -316,6 +316,7 @@ function RoomPage() {
     };
     const onMouseDown = () => {
       mouseRef.current.down = true;
+      fireRef.current = true;
       if (weaponRef.current === "sniper") chargeStartRef.current = performance.now();
     };
     const onMouseUp = () => {
@@ -325,11 +326,35 @@ function RoomPage() {
         chargeStartRef.current = null;
       }
       mouseRef.current.down = false;
+      fireRef.current = false;
     };
     canvas.addEventListener("mousemove", onMouseMove);
     canvas.addEventListener("mousedown", onMouseDown);
     window.addEventListener("mouseup", onMouseUp);
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
+    // Imperative API for the touch overlay
+    controlsApiRef.current = {
+      setMove: (v) => { moveVecRef.current = v; },
+      setAim: (v) => { aimVecRef.current = v; },
+      fireDown: () => {
+        fireRef.current = true;
+        if (weaponRef.current === "sniper") chargeStartRef.current = performance.now();
+      },
+      fireUp: () => {
+        if (weaponRef.current === "sniper" && chargeStartRef.current != null) {
+          fireSniperRelease();
+          chargeStartRef.current = null;
+        }
+        fireRef.current = false;
+      },
+      melee: () => swingMelee(performance.now()),
+      selectWeapon: (w) => {
+        weaponRef.current = w;
+        chargeStartRef.current = null;
+        setWeaponUi(w);
+      },
+    };
 
     function fireSniperRelease() {
       const self = playersRef.current.get(me.id);
@@ -485,6 +510,10 @@ function RoomPage() {
         if (k.has("s") || k.has("arrowdown")) dy += 1;
         if (k.has("a") || k.has("arrowleft")) dx -= 1;
         if (k.has("d") || k.has("arrowright")) dx += 1;
+        if (dx === 0 && dy === 0) {
+          const tv = moveVecRef.current;
+          if (tv.dx !== 0 || tv.dy !== 0) { dx = tv.dx; dy = tv.dy; }
+        }
         if (dx || dy) {
           const len = Math.hypot(dx, dy) || 1;
           const sp = BASE_SPEED * speedMult(self.upgrades);
