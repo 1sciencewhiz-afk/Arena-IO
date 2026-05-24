@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,13 +45,19 @@ function Index() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4 text-foreground">
       <div className="w-full max-w-5xl space-y-8 py-10">
-        <div className="text-center">
-          <h1 className="text-5xl font-black tracking-tight">
+        <div className="relative text-center">
+          <h1 className="text-4xl font-black tracking-tight sm:text-5xl">
             ARENA<span className="text-primary">.io</span>
           </h1>
           <p className="mt-3 text-sm text-foreground/60">
             Real-time 2D PvP. Create a room or jump into a friend's.
           </p>
+          <Link
+            to="/how-to-play"
+            className="mt-3 inline-block text-xs font-semibold text-primary underline-offset-4 hover:underline sm:absolute sm:right-0 sm:top-1 sm:mt-0"
+          >
+            How to play →
+          </Link>
         </div>
 
         <div className="grid gap-6 md:grid-cols-2">
