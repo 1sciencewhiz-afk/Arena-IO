@@ -1,63 +1,59 @@
-## 1. Fix the one-way hit / invisible-bullet bug
+## Goal
 
-Current model: each client owns its own bullets locally, broadcasts `shoot` with `self:false`, and the *victim* validates collisions against itself. This is fragile — if presence/state hasn't synced the shooter's player object on the victim's side, the bullet renders without color and can be filtered out; and any dropped `shoot` event makes that side's attacks completely invisible to others.
+Make the arena fully playable on a phone, and add a dedicated instructions page reachable from the lobby and the in-room HUD.
 
-New model — **shooter-authoritative**:
+## 1. Instructions page (`/how-to-play`)
 
-- Drop `broadcast: { self: false }`. Every client (including the shooter) processes `shoot`, `hit`, and `state` events the same way → no branchy code paths.
-- The **shooter** owns collision detection for its own bullets vs. every other player it knows about, and emits an authoritative `hit { target, by, dmg, weapon }` event.
-- All clients apply damage purely from `hit` events. Local HP is no longer mutated in two places.
-- Bullets carry `{ id, owner, ownerColor, x, y, vx, vy, born, weapon, dmg }` so they always render correctly even if the owner's presence hasn't synced yet.
-- Send bullets via broadcast immediately on spawn AND include them in the periodic state tick as a small "recent bullets" list for the first 200ms, so a dropped `shoot` packet self-heals.
-- Respawn is triggered locally only when `hit.target === me.id && newHp === 0`.
+New route `src/routes/how-to-play.tsx` with its own `head()` metadata (title, description, og tags). Sections:
 
-## 2. Weapons (6 slots, keys 1–6)
+- **Goal** — eliminate other players, earn kill points.
+- **Controls** — desktop (WASD/arrows to move, mouse aim, left-click to fire, 1–6 to switch weapons, hold for sniper charge) and mobile (left joystick to move, right joystick to aim, Fire button, weapon wheel/strip, melee button).
+- **Weapons** — short card per weapon (Pistol, Shotgun, Sniper, Rocket, Mine, Sword) pulled from `src/lib/arena/weapons.ts` so descriptions stay in sync (damage, cooldown, special behavior).
+- **Upgrades** — Damage, Fire Rate, Speed, Max HP (1 kill = 1 point, max level 5).
+- **Lobby tips** — name your room, share the 5-char code, live lobby list.
 
-| Key | Weapon | Behavior |
-|---|---|---|
-| 1 | Pistol | Single bullet, fast cooldown, low dmg |
-| 2 | Shotgun | 5-pellet spread, medium cooldown |
-| 3 | Sniper | Hold to charge, high dmg, slow cooldown, long range |
-| 4 | Rocket | Slow projectile, splash radius, high cooldown |
-| 5 | Mine | Place at feet, arms after 0.5s, triggers on proximity |
-| 6 | Sword (melee) | Short-range arc swing in aim direction, very fast, no projectile |
+Add "How to play" links:
+- Lobby page header (`src/routes/index.tsx`).
+- In-room HUD top bar (`src/routes/room/$code.tsx`) — small `?` button opens an in-room overlay (same content, no navigation away, so the player doesn't lose their session).
 
-Sword is implemented as an instantaneous arc check (range ~55px, ~90° arc) broadcast as a `swing` event; victims show a slash animation. All other weapons reuse the bullet pipeline with per-weapon `speed/dmg/lifetime/radius`.
+## 2. Mobile controls in the arena
 
-Active weapon is shown in a HUD strip at the bottom of the canvas with cooldown bars.
+Detect touch via `useIsMobile()` + `'ontouchstart' in window`. When active, render a touch overlay on top of the canvas and disable mouse/keyboard listeners' redundant work.
 
-## 3. Kill-point upgrade system
+Layout (portrait + landscape, fixed to viewport using `dvh`):
 
-Each kill grants **1 point**. Points spend in a side panel:
+```text
++-------------------------------------+
+|  HP  Wpn  Score          ? Leave    |
+|                                     |
+|            [ game canvas ]          |
+|                                     |
+|  ( move )                ( aim  )   |
+|  joystick   [Fire][Melee] joystick  |
+|             [1..6 wpn strip]        |
++-------------------------------------+
+```
 
-- **Damage +10%** (max 5 levels, cost 1/2/3/4/5)
-- **Cooldown −10%** (max 5 levels)
-- **Move speed +8%** (max 5 levels)
-- **Max HP +15** (max 5 levels)
+- **Left virtual joystick** — drag within a ~120px circle, normalized vector drives the same movement input the keyboard currently writes into (`input.move = {x, y}`), so the existing player-update loop is untouched.
+- **Right virtual joystick** — sets aim direction; releasing it does NOT fire (prevents accidental shots). For sniper, holding the Fire button while the right stick is engaged charges the shot; release Fire to launch.
+- **Fire button** — tap to shoot, hold for auto-fire / sniper charge (same code path as mouse hold).
+- **Melee button** — dedicated button that swings the Sword regardless of currently selected weapon, so melee is always one tap away on touch. (Sword stays selectable via the weapon strip too for desktop parity.)
+- **Weapon strip** — horizontally scrollable row of 6 weapon chips (icon + cooldown ring) at the bottom; tap to select. Reuses the existing cooldown values.
+- Prevent page scroll/zoom while playing: `touch-action: none` on the canvas + overlay, and `user-select: none`.
 
-Upgrades are local-only state on the player (no DB), included in the broadcast `state` payload so opponents see your stats reflected in your effective damage/speed. Points reset on leaving the room. A small "Upgrades" card sits under the Scoreboard with `+` buttons that disable when unaffordable or maxed.
+Resize handling: canvas already auto-sizes; on mobile we make the playfield fill the viewport (minus HUD bars) and scale world coordinates the same way as on desktop. No gameplay/balance changes.
 
-## 4. Named rooms + live lobby list
+## 3. Lobby on mobile
 
-No database — uses a dedicated `arena:lobby` realtime channel.
+Tweak `src/routes/index.tsx` so the create/join form and the live room list stack cleanly on narrow viewports (single column, larger touch targets, sticky "Create" button). Add the "How to play" link in the header.
 
-- When a player enters a room, they also subscribe to `arena:lobby` and `track()` presence with `{ roomCode, roomName, playerName }`.
-- The home page subscribes to `arena:lobby` (read-only, anonymous presence) and aggregates presence state by `roomCode` to render: **room name · code · player list · Join button**.
-- The "Create new room" flow adds a **Room name** input (defaults to `"<Nickname>'s Arena"`). The name is stored in `sessionStorage` keyed by code and tracked into both the room channel and the lobby channel so other players see it.
-- Joining by code still works as today. Rooms disappear from the lobby automatically when the last player leaves (presence handles it).
+## 4. Files
 
-## 5. Files touched
-
-- `src/routes/index.tsx` — add room-name input, render live "Open rooms" list from the lobby channel.
-- `src/routes/room/$code.tsx` — refactor net model, add weapons, melee, mines/rockets, upgrade panel, HUD, lobby presence tracking.
-- `src/lib/arena/weapons.ts` *(new)* — weapon definitions & stat math (kept out of the route file for clarity).
-- `src/lib/arena/lobby.ts` *(new)* — small helper that wraps the `arena:lobby` channel subscription so both the home and room routes share one implementation.
-- `src/styles.css` — minor additions for weapon HUD and upgrade buttons (semantic tokens only).
-
-No database, no auth, no new packages.
+- New: `src/routes/how-to-play.tsx`, `src/components/arena/TouchControls.tsx`, `src/components/arena/HowToPlayContent.tsx` (shared between the route and the in-room overlay).
+- Edited: `src/routes/room/$code.tsx` (wire touch input into the existing input state, add `?` overlay, add weapon strip/fire/melee buttons on mobile), `src/routes/index.tsx` (mobile-friendly layout + link), `src/styles.css` (joystick + button styles using design tokens).
 
 ## Out of scope
 
-- Persisting upgrades or stats across sessions (would need Cloud + accounts).
-- Anti-cheat beyond shooter-authoritative trust (acceptable for a friendly PvP toy).
-- Mobile touch controls.
+- No new weapons, balance changes, or persistence.
+- No haptics / gamepad API.
+- No landscape lock — we just adapt to whatever orientation the player uses.

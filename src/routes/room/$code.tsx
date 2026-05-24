@@ -4,6 +4,8 @@ import { supabase } from "@/integrations/supabase/client";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { announceRoom } from "@/lib/arena/lobby";
+import { TouchControls } from "@/components/arena/TouchControls";
+import { HowToPlayContent } from "@/components/arena/HowToPlayContent";
 import {
   WEAPONS,
   WEAPON_ORDER,
@@ -81,6 +83,16 @@ function RoomPage() {
   const [hpUi, setHpUi] = useState({ hp: 100, max: 100 });
   const [pointsUi, setPointsUi] = useState(0);
   const [upgradesUi, setUpgradesUi] = useState<Upgrades>({ ...ZERO_UPGRADES });
+  const [isTouch, setIsTouch] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const touchCapable =
+      "ontouchstart" in window ||
+      ((navigator as Navigator & { maxTouchPoints?: number }).maxTouchPoints ?? 0) > 0;
+    setIsTouch(touchCapable && window.matchMedia("(pointer: coarse)").matches);
+  }, []);
 
   const roomName = useMemo(() => {
     if (typeof window === "undefined") return code;
@@ -113,6 +125,19 @@ function RoomPage() {
   const chargeStartRef = useRef<number | null>(null);
   const pointsRef = useRef(0);
   const upgradesRef = useRef<Upgrades>({ ...ZERO_UPGRADES });
+
+  // Unified input refs (filled by mouse/keyboard or touch overlay)
+  const moveVecRef = useRef<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
+  const aimVecRef = useRef<{ dx: number; dy: number } | null>(null);
+  const fireRef = useRef(false);
+  const controlsApiRef = useRef<{
+    setMove: (v: { dx: number; dy: number }) => void;
+    setAim: (v: { dx: number; dy: number } | null) => void;
+    fireDown: () => void;
+    fireUp: () => void;
+    melee: () => void;
+    selectWeapon: (w: WeaponId) => void;
+  } | null>(null);
 
   useEffect(() => {
     const me: Player = {
@@ -291,6 +316,7 @@ function RoomPage() {
     };
     const onMouseDown = () => {
       mouseRef.current.down = true;
+      fireRef.current = true;
       if (weaponRef.current === "sniper") chargeStartRef.current = performance.now();
     };
     const onMouseUp = () => {
@@ -300,11 +326,35 @@ function RoomPage() {
         chargeStartRef.current = null;
       }
       mouseRef.current.down = false;
+      fireRef.current = false;
     };
     canvas.addEventListener("mousemove", onMouseMove);
     canvas.addEventListener("mousedown", onMouseDown);
     window.addEventListener("mouseup", onMouseUp);
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
+    // Imperative API for the touch overlay
+    controlsApiRef.current = {
+      setMove: (v) => { moveVecRef.current = v; },
+      setAim: (v) => { aimVecRef.current = v; },
+      fireDown: () => {
+        fireRef.current = true;
+        if (weaponRef.current === "sniper") chargeStartRef.current = performance.now();
+      },
+      fireUp: () => {
+        if (weaponRef.current === "sniper" && chargeStartRef.current != null) {
+          fireSniperRelease();
+          chargeStartRef.current = null;
+        }
+        fireRef.current = false;
+      },
+      melee: () => swingMelee(performance.now()),
+      selectWeapon: (w) => {
+        weaponRef.current = w;
+        chargeStartRef.current = null;
+        setWeaponUi(w);
+      },
+    };
 
     function fireSniperRelease() {
       const self = playersRef.current.get(me.id);
@@ -317,7 +367,7 @@ function RoomPage() {
       lastFireRef.current.sniper = t;
       const chargedMs = chargeStartRef.current ? now - chargeStartRef.current : 0;
       const chargeRatio = Math.min(1, chargedMs / ((w.charge ?? 0.6) * 1000));
-      const ang = Math.atan2(mouseRef.current.y - self.y, mouseRef.current.x - self.x);
+      const ang = currentAimAngle(self);
       const dmg = w.dmg * (0.4 + 0.6 * chargeRatio) * dmgMult(self.upgrades);
       const p: Projectile = {
         id: `${me.id}-s-${now}`,
@@ -337,10 +387,53 @@ function RoomPage() {
       channelRef.current?.send({ type: "broadcast", event: "fire", payload: { projectiles: [p] } });
     }
 
+    function currentAimAngle(self: Player): number {
+      const v = aimVecRef.current;
+      if (v && (v.dx !== 0 || v.dy !== 0)) return Math.atan2(v.dy, v.dx);
+      return Math.atan2(mouseRef.current.y - self.y, mouseRef.current.x - self.x);
+    }
+
+    function swingMelee(now: number) {
+      const self = playersRef.current.get(me.id);
+      if (!self || self.hp <= 0) return;
+      const w = WEAPONS.sword;
+      const t = now / 1000;
+      const cd = w.cooldown * cooldownMult(self.upgrades);
+      if (t - lastFireRef.current.sword < cd) return;
+      lastFireRef.current.sword = t;
+      const ang = currentAimAngle(self);
+      const dmgScale = dmgMult(self.upgrades);
+      const swing: SwingFx = {
+        x: self.x, y: self.y, ang, range: w.melee!.range, arc: w.melee!.arc,
+        born: now, color: self.color,
+      };
+      swingsRef.current.push(swing);
+      channelRef.current?.send({ type: "broadcast", event: "swing", payload: swing });
+      for (const other of playersRef.current.values()) {
+        if (other.id === me.id || other.hp <= 0) continue;
+        const dx = other.x - self.x;
+        const dy = other.y - self.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > w.melee!.range + PLAYER_R) continue;
+        const a = Math.atan2(dy, dx);
+        let diff = a - ang;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        if (Math.abs(diff) <= w.melee!.arc / 2) {
+          const dmg = w.dmg * dmgScale;
+          applyDamage(other.id, me.id, dmg, "sword");
+          channelRef.current?.send({
+            type: "broadcast", event: "hit",
+            payload: { target: other.id, by: me.id, dmg, weapon: "sword" },
+          });
+        }
+      }
+    }
+
     function tryFire(now: number) {
       const self = playersRef.current.get(me.id);
       if (!self || self.hp <= 0) return;
-      if (!mouseRef.current.down) return;
+      if (!fireRef.current) return;
       const w = WEAPONS[weaponRef.current];
       const t = now / 1000;
       const cd = w.cooldown * cooldownMult(self.upgrades);
@@ -350,36 +443,12 @@ function RoomPage() {
       if (w.id === "sniper") return;
 
       lastFireRef.current[w.id] = t;
-      const ang = Math.atan2(mouseRef.current.y - self.y, mouseRef.current.x - self.x);
+      const ang = currentAimAngle(self);
       const dmgScale = dmgMult(self.upgrades);
 
       if (w.melee) {
-        // Sword: instant arc check, broadcast swing fx, broadcast hits authoritatively
-        const swing: SwingFx = {
-          x: self.x, y: self.y, ang, range: w.melee.range, arc: w.melee.arc,
-          born: now, color: self.color,
-        };
-        swingsRef.current.push(swing);
-        channelRef.current?.send({ type: "broadcast", event: "swing", payload: swing });
-        for (const other of playersRef.current.values()) {
-          if (other.id === me.id || other.hp <= 0) continue;
-          const dx = other.x - self.x;
-          const dy = other.y - self.y;
-          const dist = Math.hypot(dx, dy);
-          if (dist > w.melee.range + PLAYER_R) continue;
-          const a = Math.atan2(dy, dx);
-          let diff = a - ang;
-          while (diff > Math.PI) diff -= Math.PI * 2;
-          while (diff < -Math.PI) diff += Math.PI * 2;
-          if (Math.abs(diff) <= w.melee.arc / 2) {
-            const dmg = w.dmg * dmgScale;
-            applyDamage(other.id, me.id, dmg, "sword");
-            channelRef.current?.send({
-              type: "broadcast", event: "hit",
-              payload: { target: other.id, by: me.id, dmg, weapon: "sword" },
-            });
-          }
-        }
+        swingMelee(now);
+        void ang;
         return;
       }
 
@@ -441,6 +510,10 @@ function RoomPage() {
         if (k.has("s") || k.has("arrowdown")) dy += 1;
         if (k.has("a") || k.has("arrowleft")) dx -= 1;
         if (k.has("d") || k.has("arrowright")) dx += 1;
+        if (dx === 0 && dy === 0) {
+          const tv = moveVecRef.current;
+          if (tv.dx !== 0 || tv.dy !== 0) { dx = tv.dx; dy = tv.dy; }
+        }
         if (dx || dy) {
           const len = Math.hypot(dx, dy) || 1;
           const sp = BASE_SPEED * speedMult(self.upgrades);
@@ -705,6 +778,9 @@ function RoomPage() {
             >
               {copied ? "Copied!" : "Copy invite"}
             </Button>
+            <Button size="sm" variant="ghost" onClick={() => setShowHelp(true)} aria-label="How to play">
+              ?
+            </Button>
           </div>
         </div>
 
@@ -715,7 +791,7 @@ function RoomPage() {
                 ref={canvasRef}
                 width={ARENA_W}
                 height={ARENA_H}
-                className="block w-full cursor-crosshair"
+                className="block w-full cursor-crosshair touch-none select-none"
                 style={{ aspectRatio: `${ARENA_W} / ${ARENA_H}` }}
               />
             </div>
@@ -832,6 +908,36 @@ function RoomPage() {
           </aside>
         </div>
       </div>
+
+      {isTouch && controlsApiRef.current && (
+        <TouchControls
+          weapon={weaponUi}
+          onMove={(v) => controlsApiRef.current?.setMove(v)}
+          onAim={(v) => controlsApiRef.current?.setAim(v)}
+          onFireDown={() => controlsApiRef.current?.fireDown()}
+          onFireUp={() => controlsApiRef.current?.fireUp()}
+          onMelee={() => controlsApiRef.current?.melee()}
+          onSelectWeapon={(w) => controlsApiRef.current?.selectWeapon(w)}
+        />
+      )}
+
+      {showHelp && (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-background/80 p-4 backdrop-blur"
+          onClick={() => setShowHelp(false)}
+        >
+          <div
+            className="my-8 w-full max-w-2xl rounded-2xl border border-foreground/10 bg-background p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-xl font-black">How to play</h2>
+              <Button size="sm" variant="ghost" onClick={() => setShowHelp(false)}>Close</Button>
+            </div>
+            <HowToPlayContent />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
