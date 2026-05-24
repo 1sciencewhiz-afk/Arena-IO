@@ -778,6 +778,9 @@ function RoomPage() {
             >
               {copied ? "Copied!" : "Copy invite"}
             </Button>
+            <Button size="sm" variant="ghost" onClick={() => setShowHelp(true)} aria-label="How to play">
+              ?
+            </Button>
           </div>
         </div>
 
@@ -788,7 +791,7 @@ function RoomPage() {
                 ref={canvasRef}
                 width={ARENA_W}
                 height={ARENA_H}
-                className="block w-full cursor-crosshair"
+                className="block w-full cursor-crosshair touch-none select-none"
                 style={{ aspectRatio: `${ARENA_W} / ${ARENA_H}` }}
               />
             </div>
