@@ -85,6 +85,27 @@ function RoomPage() {
   const [upgradesUi, setUpgradesUi] = useState<Upgrades>({ ...ZERO_UPGRADES });
   const [isTouch, setIsTouch] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [mobilePanel, setMobilePanel] = useState<null | "upgrades" | "scoreboard">(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await (rootRef.current ?? document.documentElement).requestFullscreen();
+      } else {
+        await document.exitFullscreen();
+      }
+    } catch {
+      /* ignore */
+    }
+  };
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -748,35 +769,47 @@ function RoomPage() {
   }, [code]);
 
   return (
-    <div className="min-h-screen bg-background px-4 py-6 text-foreground">
-      <div className="mx-auto flex max-w-[1280px] flex-col gap-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+    <div
+      ref={rootRef}
+      className={`bg-background text-foreground ${isTouch ? "h-[100dvh] overflow-hidden p-2" : "min-h-screen px-4 py-6"}`}
+    >
+      <div className={`mx-auto flex flex-col gap-4 ${isTouch ? "h-full max-w-full gap-2" : "max-w-[1280px]"}`}>
+        <div className={`flex flex-wrap items-center justify-between gap-2 ${isTouch ? "gap-1" : "gap-3"}`}>
           <div className="flex items-center gap-4">
             <Link to="/" className="text-sm text-foreground/60 hover:text-foreground">
               ← Leave
             </Link>
-            <h1 className="text-2xl font-black tracking-tight">
-              ARENA<span className="text-primary">.io</span>
-            </h1>
+            {!isTouch && (
+              <h1 className="text-2xl font-black tracking-tight">
+                ARENA<span className="text-primary">.io</span>
+              </h1>
+            )}
             <span className={`text-xs ${connected ? "text-primary" : "text-foreground/40"}`}>
               {connected ? "● live" : "○ connecting…"}
             </span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="rounded-lg border border-foreground/10 bg-foreground/5 px-3 py-1.5 text-sm">
-              <span className="font-bold">{roomName}</span>
-              <span className="ml-2 font-mono text-xs tracking-widest text-foreground/50">{code}</span>
-            </div>
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => {
-                navigator.clipboard?.writeText(shareUrl);
-                setCopied(true);
-                setTimeout(() => setCopied(false), 1500);
-              }}
-            >
-              {copied ? "Copied!" : "Copy invite"}
+            {!isTouch && (
+              <div className="rounded-lg border border-foreground/10 bg-foreground/5 px-3 py-1.5 text-sm">
+                <span className="font-bold">{roomName}</span>
+                <span className="ml-2 font-mono text-xs tracking-widest text-foreground/50">{code}</span>
+              </div>
+            )}
+            {!isTouch && (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  navigator.clipboard?.writeText(shareUrl);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                }}
+              >
+                {copied ? "Copied!" : "Copy invite"}
+              </Button>
+            )}
+            <Button size="sm" variant="ghost" onClick={toggleFullscreen} aria-label="Toggle fullscreen">
+              {isFullscreen ? "⤢" : "⛶"}
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setShowHelp(true)} aria-label="How to play">
               ?
@@ -784,18 +817,19 @@ function RoomPage() {
           </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-[1fr_260px]">
-          <div className="space-y-3">
-            <div className="overflow-hidden rounded-xl border border-foreground/10 bg-black shadow-2xl">
+        <div className={isTouch ? "flex min-h-0 flex-1" : "grid gap-4 lg:grid-cols-[1fr_260px]"}>
+          <div className={isTouch ? "flex min-h-0 flex-1 items-center justify-center" : "space-y-3"}>
+            <div className={`overflow-hidden ${isTouch ? "h-full w-full" : "rounded-xl border border-foreground/10 bg-black shadow-2xl"}`}>
               <canvas
                 ref={canvasRef}
                 width={ARENA_W}
                 height={ARENA_H}
-                className="block w-full cursor-crosshair touch-none select-none"
-                style={{ aspectRatio: `${ARENA_W} / ${ARENA_H}` }}
+                className={`block cursor-crosshair touch-none select-none ${isTouch ? "h-full w-full object-contain" : "w-full"}`}
+                style={isTouch ? undefined : { aspectRatio: `${ARENA_W} / ${ARENA_H}` }}
               />
             </div>
-            {/* Weapon HUD */}
+            {/* Weapon HUD (desktop only) */}
+            {!isTouch && (
             <div className="grid grid-cols-6 gap-2">
               {WEAPON_ORDER.map((id) => {
                 const w = WEAPONS[id];
@@ -825,7 +859,9 @@ function RoomPage() {
                 );
               })}
             </div>
+            )}
           </div>
+          {!isTouch && (
           <aside className="space-y-3">
             <div className="rounded-xl border border-foreground/10 bg-foreground/5 p-4">
               <h2 className="mb-2 text-xs uppercase tracking-wider text-foreground/60">Status</h2>
@@ -906,8 +942,99 @@ function RoomPage() {
               <div>Sniper: hold to charge, release to fire</div>
             </div>
           </aside>
+          )}
         </div>
       </div>
+
+      {/* Mobile compact HUD overlay */}
+      {isTouch && (
+        <>
+          <div className="pointer-events-none fixed left-2 top-14 z-40 flex flex-col gap-1.5">
+            <div className="pointer-events-auto rounded-md bg-background/60 px-2 py-1 backdrop-blur">
+              <div className="flex items-center gap-2 text-[10px]">
+                <span className="text-foreground/60">HP</span>
+                <div className="h-1.5 w-20 overflow-hidden rounded bg-foreground/15">
+                  <div className="h-full bg-primary" style={{ width: `${(hpUi.hp / hpUi.max) * 100}%` }} />
+                </div>
+                <span className="font-mono">{Math.round(hpUi.hp)}</span>
+              </div>
+            </div>
+            <div className="pointer-events-auto flex gap-1">
+              <button
+                onClick={() => setMobilePanel(mobilePanel === "upgrades" ? null : "upgrades")}
+                className="rounded-md bg-background/60 px-2 py-1 text-[10px] font-bold backdrop-blur"
+              >
+                ★ {pointsUi}
+              </button>
+              <button
+                onClick={() => setMobilePanel(mobilePanel === "scoreboard" ? null : "scoreboard")}
+                className="rounded-md bg-background/60 px-2 py-1 text-[10px] font-bold backdrop-blur"
+              >
+                ⚑ {scoreboard.length}
+              </button>
+            </div>
+          </div>
+
+          {mobilePanel && (
+            <div
+              className="fixed inset-0 z-50 flex items-end bg-background/60 backdrop-blur"
+              onClick={() => setMobilePanel(null)}
+            >
+              <div
+                className="max-h-[70vh] w-full overflow-y-auto rounded-t-2xl border-t border-foreground/10 bg-background p-4"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {mobilePanel === "upgrades" && (
+                  <>
+                    <div className="mb-3 flex items-center justify-between">
+                      <h3 className="text-sm font-bold uppercase tracking-wider">Upgrades</h3>
+                      <span className="font-mono text-sm text-primary">★ {pointsUi}</span>
+                    </div>
+                    <ul className="space-y-2">
+                      {UPGRADE_DEFS.map((u) => {
+                        const lvl = upgradesUi[u.id];
+                        const maxed = lvl >= MAX_UPGRADE_LEVEL;
+                        const cost = maxed ? 0 : upgradeCost(lvl);
+                        const can = !maxed && pointsUi >= cost;
+                        return (
+                          <li key={u.id} className="flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="text-sm font-semibold">{u.name}</div>
+                              <div className="text-[10px] text-foreground/50">Lv {lvl}/{MAX_UPGRADE_LEVEL}</div>
+                            </div>
+                            <Button size="sm" variant={can ? "default" : "secondary"} disabled={!can} onClick={() => buyUpgrade(u.id)}>
+                              {maxed ? "MAX" : `+1 (${cost})`}
+                            </Button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </>
+                )}
+                {mobilePanel === "scoreboard" && (
+                  <>
+                    <div className="mb-3 flex items-center justify-between">
+                      <h3 className="text-sm font-bold uppercase tracking-wider">Scoreboard</h3>
+                      <span className="font-mono text-xs text-foreground/50">{roomName} · {code}</span>
+                    </div>
+                    <ul className="space-y-1.5">
+                      {scoreboard.map((p) => (
+                        <li key={p.id} className="flex items-center justify-between text-sm">
+                          <span className="flex items-center gap-2 truncate">
+                            <span className="inline-block h-3 w-3 rounded-full" style={{ backgroundColor: p.color }} />
+                            <span className="truncate">{p.name}</span>
+                          </span>
+                          <span className="font-mono font-bold">{p.kills}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
       {isTouch && controlsApiRef.current && (
         <TouchControls
