@@ -25,6 +25,11 @@ function Joystick({
   const baseRef = useRef<HTMLDivElement | null>(null);
   const [knob, setKnob] = useState<{ x: number; y: number } | null>(null);
   const activeId = useRef<number | null>(null);
+  // Keep latest callbacks in refs so we don't rebind listeners every render
+  const onChangeRef = useRef(onChange);
+  const onEndRef = useRef(onEnd);
+  onChangeRef.current = onChange;
+  onEndRef.current = onEnd;
   const RADIUS = 56;
 
   useEffect(() => {
@@ -46,61 +51,58 @@ function Joystick({
         dy = (dy / len) * RADIUS;
       }
       setKnob({ x: dx, y: dy });
-      onChange({ dx: dx / RADIUS, dy: dy / RADIUS });
+      onChangeRef.current({ dx: dx / RADIUS, dy: dy / RADIUS });
     };
 
-    const onStart = (e: TouchEvent) => {
+    // Use Pointer Events with setPointerCapture — most reliable cross-device.
+    const onDown = (e: PointerEvent) => {
       if (activeId.current != null) return;
-      const t = e.changedTouches[0];
-      activeId.current = t.identifier;
-      update(t.clientX, t.clientY);
+      activeId.current = e.pointerId;
+      try { el.setPointerCapture(e.pointerId); } catch { /* noop */ }
+      update(e.clientX, e.clientY);
       e.preventDefault();
     };
-    const onMove = (e: TouchEvent) => {
-      for (const t of Array.from(e.changedTouches)) {
-        if (t.identifier === activeId.current) {
-          update(t.clientX, t.clientY);
-          e.preventDefault();
-          break;
-        }
-      }
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerId !== activeId.current) return;
+      update(e.clientX, e.clientY);
+      e.preventDefault();
     };
-    const onEndTouch = (e: TouchEvent) => {
-      for (const t of Array.from(e.changedTouches)) {
-        if (t.identifier === activeId.current) {
-          activeId.current = null;
-          setKnob(null);
-          onChange({ dx: 0, dy: 0 });
-          onEnd?.();
-          e.preventDefault();
-          break;
-        }
-      }
+    const onUp = (e: PointerEvent) => {
+      if (e.pointerId !== activeId.current) return;
+      activeId.current = null;
+      try { el.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+      setKnob(null);
+      onChangeRef.current({ dx: 0, dy: 0 });
+      onEndRef.current?.();
     };
 
-    el.addEventListener("touchstart", onStart, { passive: false });
-    window.addEventListener("touchmove", onMove, { passive: false });
-    window.addEventListener("touchend", onEndTouch, { passive: false });
-    window.addEventListener("touchcancel", onEndTouch, { passive: false });
+    el.addEventListener("pointerdown", onDown);
+    el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerup", onUp);
+    el.addEventListener("pointercancel", onUp);
     return () => {
-      el.removeEventListener("touchstart", onStart);
-      window.removeEventListener("touchmove", onMove);
-      window.removeEventListener("touchend", onEndTouch);
-      window.removeEventListener("touchcancel", onEndTouch);
+      el.removeEventListener("pointerdown", onDown);
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerup", onUp);
+      el.removeEventListener("pointercancel", onUp);
     };
-  }, [onChange, onEnd]);
+  }, []);
 
   return (
     <div
       ref={baseRef}
-      className={`pointer-events-auto fixed bottom-24 ${side === "left" ? "left-4" : "right-4"} h-32 w-32 touch-none select-none rounded-full border border-foreground/20 bg-foreground/10 backdrop-blur`}
+      className={`pointer-events-auto fixed bottom-24 ${side === "left" ? "left-4" : "right-4"} h-32 w-32 touch-none select-none rounded-full border border-foreground/25 bg-background/40 backdrop-blur`}
+      style={{ touchAction: "none" }}
     >
       <div
-        className="absolute left-1/2 top-1/2 h-14 w-14 rounded-full bg-primary/80 shadow-lg transition-transform"
+        className="pointer-events-none absolute left-1/2 top-1/2 h-14 w-14 rounded-full bg-primary/80 shadow-lg"
         style={{
           transform: `translate(-50%, -50%) translate(${knob?.x ?? 0}px, ${knob?.y ?? 0}px)`,
         }}
       />
+      <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[10px] font-bold uppercase tracking-wider text-foreground/40">
+        {side === "left" ? "move" : "aim"}
+      </div>
     </div>
   );
 }
@@ -117,28 +119,34 @@ export function TouchControls({
   return (
     <>
       <Joystick side="left" onChange={onMove} />
-      <Joystick side="right" onChange={(v) => onAim(v.dx === 0 && v.dy === 0 ? null : v)} onEnd={() => onAim(null)} />
+      {/* Sticky aim: keep last direction after release so the player keeps facing where they aimed. */}
+      <Joystick
+        side="right"
+        onChange={(v) => {
+          if (v.dx !== 0 || v.dy !== 0) onAim(v);
+        }}
+      />
 
       {/* Fire + Melee */}
-      <div className="pointer-events-auto fixed bottom-60 right-4 flex flex-col gap-2">
+      <div className="pointer-events-auto fixed right-4 bottom-[260px] flex flex-col gap-2">
         <button
           onTouchStart={(e) => { e.preventDefault(); onFireDown(); }}
           onTouchEnd={(e) => { e.preventDefault(); onFireUp(); }}
           onTouchCancel={(e) => { e.preventDefault(); onFireUp(); }}
-          className="h-20 w-20 touch-none select-none rounded-full border-2 border-primary bg-primary/80 text-sm font-black text-primary-foreground shadow-xl active:scale-95"
+          className="h-20 w-20 touch-none select-none rounded-full border-2 border-primary bg-primary/85 text-sm font-black text-primary-foreground shadow-xl active:scale-95"
         >
           FIRE
         </button>
         <button
           onTouchStart={(e) => { e.preventDefault(); onMelee(); }}
-          className="h-14 w-20 touch-none select-none rounded-full border border-foreground/30 bg-foreground/10 text-xs font-bold text-foreground shadow-lg active:scale-95"
+          className="h-14 w-20 touch-none select-none rounded-full border border-foreground/30 bg-background/40 text-xs font-bold text-foreground shadow-lg backdrop-blur active:scale-95"
         >
           MELEE
         </button>
       </div>
 
       {/* Weapon strip */}
-      <div className="pointer-events-auto fixed bottom-2 left-1/2 flex -translate-x-1/2 gap-1.5 rounded-full border border-foreground/15 bg-background/80 px-2 py-1.5 backdrop-blur">
+      <div className="pointer-events-auto fixed bottom-2 left-1/2 flex -translate-x-1/2 gap-1 rounded-full border border-foreground/15 bg-background/70 px-1.5 py-1 backdrop-blur">
         {WEAPON_ORDER.map((id) => {
           const w = WEAPONS[id];
           const active = weapon === id;
@@ -146,7 +154,8 @@ export function TouchControls({
             <button
               key={id}
               onTouchStart={(e) => { e.preventDefault(); onSelectWeapon(id); }}
-              className={`h-10 min-w-10 select-none rounded-full px-2 text-[10px] font-bold transition ${
+              onClick={() => onSelectWeapon(id)}
+              className={`h-9 min-w-9 select-none rounded-full px-2 text-[10px] font-bold transition ${
                 active
                   ? "bg-primary text-primary-foreground"
                   : "bg-foreground/10 text-foreground/70"
