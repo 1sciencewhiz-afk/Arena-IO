@@ -137,54 +137,7 @@ function RoomPage() {
 
   const profileAppliedRef = useRef(false);
 
-  // When the saved profile loads, apply username + persistent upgrades/points to the live player
-  useEffect(() => {
-    if (!profile || profileAppliedRef.current) return;
-    profileAppliedRef.current = true;
-    meRef.current.name = profile.username;
-    const self = playersRef.current.get(meRef.current.id);
-    if (self) {
-      self.name = profile.username;
-      self.upgrades = { ...profile.upgrades };
-      self.maxHp = maxHp(profile.upgrades);
-      self.hp = self.maxHp;
-      upgradesRef.current = { ...profile.upgrades };
-      pointsRef.current = profile.kill_points;
-      setUpgradesUi({ ...profile.upgrades });
-      setPointsUi(profile.kill_points);
-      setHpUi({ hp: self.hp, max: self.maxHp });
-      // Re-broadcast presence + state with the right name/upgrades
-      channelRef.current?.track({ name: self.name, color: self.color });
-    }
-  }, [profile]);
-
-  // Debounced save of progress to the database (signed-in users only)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (!userId || !profileAppliedRef.current) return;
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      saveProfileProgress(userId, {
-        kill_points: pointsUi,
-        upgrades: upgradesUi,
-      }).catch(() => { /* ignore transient errors */ });
-    }, 600);
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    };
-  }, [userId, pointsUi, upgradesUi]);
-
-  // Final flush on unmount
-  useEffect(() => {
-    return () => {
-      if (userId && profileAppliedRef.current) {
-        saveProfileProgress(userId, {
-          kill_points: pointsRef.current,
-          upgrades: upgradesRef.current,
-        }).catch(() => { /* ignore */ });
-      }
-    };
-  }, [userId]);
 
   // Game state in refs
   const playersRef = useRef<Map<string, Player>>(new Map());
@@ -214,6 +167,53 @@ function RoomPage() {
     melee: () => void;
     selectWeapon: (w: WeaponId) => void;
   } | null>(null);
+
+  // When the saved profile loads, apply username + persistent upgrades/points
+  useEffect(() => {
+    if (!profile || profileAppliedRef.current) return;
+    profileAppliedRef.current = true;
+    meRef.current.name = profile.username;
+    const self = playersRef.current.get(meRef.current.id);
+    if (self) {
+      self.name = profile.username;
+      self.upgrades = { ...profile.upgrades };
+      self.maxHp = maxHp(profile.upgrades);
+      self.hp = self.maxHp;
+      setHpUi({ hp: self.hp, max: self.maxHp });
+      channelRef.current?.track({ name: self.name, color: self.color });
+    }
+    upgradesRef.current = { ...profile.upgrades };
+    pointsRef.current = profile.kill_points;
+    setUpgradesUi({ ...profile.upgrades });
+    setPointsUi(profile.kill_points);
+  }, [profile]);
+
+  // Debounced save of progress to the database (signed-in users only)
+  useEffect(() => {
+    if (!userId || !profileAppliedRef.current) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      saveProfileProgress(userId, {
+        kill_points: pointsUi,
+        upgrades: upgradesUi,
+      }).catch(() => { /* ignore transient errors */ });
+    }, 600);
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [userId, pointsUi, upgradesUi]);
+
+  // Final flush on unmount
+  useEffect(() => {
+    return () => {
+      if (userId && profileAppliedRef.current) {
+        saveProfileProgress(userId, {
+          kill_points: pointsRef.current,
+          upgrades: upgradesRef.current,
+        }).catch(() => { /* ignore */ });
+      }
+    };
+  }, [userId]);
 
   useEffect(() => {
     const me: Player = {
