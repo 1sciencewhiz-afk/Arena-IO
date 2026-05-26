@@ -3,6 +3,9 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { subscribeLobby, type LobbyRoom } from "@/lib/arena/lobby";
+import { useAuthUser, useProfile, signOut } from "@/lib/arena/auth";
+
+export const PUBLIC_ROOM_CODE = "PUBLIC";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -20,6 +23,8 @@ function randomCode() {
 
 function Index() {
   const navigate = useNavigate();
+  const { userId, ready } = useAuthUser();
+  const profile = useProfile(userId);
   const [name, setName] = useState(() =>
     typeof window === "undefined" ? "" : localStorage.getItem("arena.name") ?? "",
   );
@@ -29,11 +34,25 @@ function Index() {
 
   useEffect(() => subscribeLobby(setRooms), []);
 
+  // When signed in, lock nickname to username
+  useEffect(() => {
+    if (profile?.username) {
+      setName(profile.username);
+      try { localStorage.setItem("arena.name", profile.username); } catch { /* ignore */ }
+    }
+  }, [profile?.username]);
+
+  const isGuest = !userId;
+  const displayName = profile?.username ?? (name.trim() || "Guest");
+
   const go = (roomCode: string, customName?: string) => {
     const trimmed = name.trim() || `Player${Math.floor(Math.random() * 999)}`;
     localStorage.setItem("arena.name", trimmed);
     const upper = roomCode.toUpperCase();
-    const finalName = (customName ?? roomName).trim() || `${trimmed}'s Arena`;
+    const finalName =
+      upper === PUBLIC_ROOM_CODE
+        ? "Public Arena"
+        : (customName ?? roomName).trim() || `${trimmed}'s Arena`;
     try {
       sessionStorage.setItem(`arena.roomName.${upper}`, finalName);
     } catch {
@@ -42,9 +61,40 @@ function Index() {
     navigate({ to: "/room/$code", params: { code: upper } });
   };
 
+  const publicRoom = rooms.find((r) => r.code === PUBLIC_ROOM_CODE);
+  const otherRooms = rooms.filter((r) => r.code !== PUBLIC_ROOM_CODE);
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4 text-foreground">
       <div className="w-full max-w-5xl space-y-8 py-10">
+        {/* Account bar */}
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-foreground/10 bg-foreground/5 px-4 py-2.5 text-sm">
+          <div className="flex items-center gap-2">
+            <span className={`inline-block h-2 w-2 rounded-full ${userId ? "bg-primary" : "bg-foreground/30"}`} />
+            <span className="text-foreground/70">
+              {ready
+                ? userId
+                  ? <>Signed in as <span className="font-bold text-foreground">{displayName}</span></>
+                  : <>Playing as <span className="font-bold text-foreground">Guest</span></>
+                : "…"}
+            </span>
+            {profile && (
+              <span className="ml-2 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-mono font-bold text-primary">
+                {profile.kill_points} pts
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {userId ? (
+              <Button size="sm" variant="ghost" onClick={() => signOut()}>Sign out</Button>
+            ) : (
+              <Link to="/login">
+                <Button size="sm" variant="secondary">Sign in / Create account</Button>
+              </Link>
+            )}
+          </div>
+        </div>
+
         <div className="relative text-center">
           <h1 className="text-4xl font-black tracking-tight sm:text-5xl">
             ARENA<span className="text-primary">.io</span>
@@ -60,6 +110,29 @@ function Index() {
           </Link>
         </div>
 
+        {/* Public Arena CTA */}
+        <button
+          onClick={() => go(PUBLIC_ROOM_CODE, "Public Arena")}
+          className="group flex w-full items-center justify-between gap-4 rounded-2xl border-2 border-primary/40 bg-gradient-to-r from-primary/20 to-primary/5 p-5 text-left transition hover:border-primary hover:from-primary/30"
+        >
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="text-lg font-black tracking-tight">PUBLIC ARENA</span>
+              <span className="rounded-md bg-primary/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary">
+                No code needed
+              </span>
+            </div>
+            <p className="mt-1 truncate text-xs text-foreground/60">
+              {publicRoom && publicRoom.players.length > 0
+                ? `${publicRoom.players.length} player${publicRoom.players.length === 1 ? "" : "s"} in the arena: ${publicRoom.players.join(", ")}`
+                : "Be the first one in — open to everyone."}
+            </p>
+          </div>
+          <span className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-primary-foreground transition group-hover:scale-105">
+            JOIN →
+          </span>
+        </button>
+
         <div className="grid gap-6 md:grid-cols-2">
           <div className="space-y-4 rounded-2xl border border-foreground/10 bg-foreground/5 p-6 backdrop-blur">
             <div>
@@ -71,8 +144,14 @@ function Index() {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Your name"
                 maxLength={16}
+                disabled={!!userId}
                 className="border-foreground/10 bg-background text-foreground"
               />
+              {userId && (
+                <p className="mt-1 text-[10px] text-foreground/40">
+                  Your username is used in-game.
+                </p>
+              )}
             </div>
 
             <div>
@@ -120,12 +199,12 @@ function Index() {
           <div className="rounded-2xl border border-foreground/10 bg-foreground/5 p-6 backdrop-blur">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-sm font-bold uppercase tracking-wider text-foreground/80">
-                Open rooms
+                Private rooms
               </h2>
-              <span className="text-xs text-foreground/40">{rooms.length} live</span>
+              <span className="text-xs text-foreground/40">{otherRooms.length} live</span>
             </div>
             <ul className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
-              {rooms.map((r) => (
+              {otherRooms.map((r) => (
                 <li
                   key={r.code}
                   className="flex items-center justify-between gap-3 rounded-lg border border-foreground/10 bg-background/40 p-3"
@@ -147,9 +226,9 @@ function Index() {
                   </Button>
                 </li>
               ))}
-              {rooms.length === 0 && (
+              {otherRooms.length === 0 && (
                 <li className="rounded-lg border border-dashed border-foreground/10 p-6 text-center text-xs text-foreground/40">
-                  No active rooms. Create one to get started.
+                  No private rooms. Create one to get started.
                 </li>
               )}
             </ul>
@@ -159,6 +238,11 @@ function Index() {
         <p className="text-center text-xs text-foreground/40">
           WASD to move · 1–6 switch weapons · Click to attack · Spend kills on upgrades
         </p>
+        {isGuest && ready && (
+          <p className="text-center text-[11px] text-foreground/50">
+            Playing as guest — <Link to="/login" className="font-semibold text-primary underline-offset-4 hover:underline">create an account</Link> to save your upgrades across sessions.
+          </p>
+        )}
       </div>
     </div>
   );
