@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { announceRoom } from "@/lib/arena/lobby";
 import { TouchControls } from "@/components/arena/TouchControls";
 import { HowToPlayContent } from "@/components/arena/HowToPlayContent";
+import { useAuthUser, useProfile, saveProfileProgress } from "@/lib/arena/auth";
 import {
   WEAPONS,
   WEAPON_ORDER,
@@ -75,6 +76,8 @@ function colorFor(id: string) {
 
 function RoomPage() {
   const { code } = Route.useParams();
+  const { userId } = useAuthUser();
+  const profile = useProfile(userId);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [connected, setConnected] = useState(false);
   const [scoreboard, setScoreboard] = useState<Player[]>([]);
@@ -117,6 +120,7 @@ function RoomPage() {
 
   const roomName = useMemo(() => {
     if (typeof window === "undefined") return code;
+    if (code === "PUBLIC") return "Public Arena";
     return sessionStorage.getItem(`arena.roomName.${code}`) || code;
   }, [code]);
 
@@ -130,6 +134,10 @@ function RoomPage() {
       (typeof window !== "undefined" && localStorage.getItem("arena.name")) ||
       `Player${Math.floor(Math.random() * 999)}`,
   });
+
+  const profileAppliedRef = useRef(false);
+
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Game state in refs
   const playersRef = useRef<Map<string, Player>>(new Map());
@@ -159,6 +167,53 @@ function RoomPage() {
     melee: () => void;
     selectWeapon: (w: WeaponId) => void;
   } | null>(null);
+
+  // When the saved profile loads, apply username + persistent upgrades/points
+  useEffect(() => {
+    if (!profile || profileAppliedRef.current) return;
+    profileAppliedRef.current = true;
+    meRef.current.name = profile.username;
+    const self = playersRef.current.get(meRef.current.id);
+    if (self) {
+      self.name = profile.username;
+      self.upgrades = { ...profile.upgrades };
+      self.maxHp = maxHp(profile.upgrades);
+      self.hp = self.maxHp;
+      setHpUi({ hp: self.hp, max: self.maxHp });
+      channelRef.current?.track({ name: self.name, color: self.color });
+    }
+    upgradesRef.current = { ...profile.upgrades };
+    pointsRef.current = profile.kill_points;
+    setUpgradesUi({ ...profile.upgrades });
+    setPointsUi(profile.kill_points);
+  }, [profile]);
+
+  // Debounced save of progress to the database (signed-in users only)
+  useEffect(() => {
+    if (!userId || !profileAppliedRef.current) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      saveProfileProgress(userId, {
+        kill_points: pointsUi,
+        upgrades: upgradesUi,
+      }).catch(() => { /* ignore transient errors */ });
+    }, 600);
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [userId, pointsUi, upgradesUi]);
+
+  // Final flush on unmount
+  useEffect(() => {
+    return () => {
+      if (userId && profileAppliedRef.current) {
+        saveProfileProgress(userId, {
+          kill_points: pointsRef.current,
+          upgrades: upgradesRef.current,
+        }).catch(() => { /* ignore */ });
+      }
+    };
+  }, [userId]);
 
   useEffect(() => {
     const me: Player = {
