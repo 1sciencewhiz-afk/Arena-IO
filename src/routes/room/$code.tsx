@@ -311,28 +311,57 @@ function RoomPage() {
           id: string; x: number; y: number; hp: number; maxHp: number; name: string;
           kills: number; color: string; upgrades: Upgrades;
         };
+        // Validate / clamp incoming state so a malicious peer can't spoof huge
+        // hp/kills/upgrade values that drive the scoreboard or UI.
+        if (!p || typeof p.id !== "string") return;
+        const clampNum = (v: unknown, min: number, max: number, def = 0) => {
+          const n = typeof v === "number" && Number.isFinite(v) ? v : def;
+          return Math.max(min, Math.min(max, n));
+        };
+        const safeMaxHp = clampNum(p.maxHp, 1, 1000, 100);
+        const safeHp = clampNum(p.hp, 0, safeMaxHp, safeMaxHp);
+        const safeKills = clampNum(p.kills, 0, 100000, 0);
+        const rawU = (p.upgrades ?? ZERO_UPGRADES) as Upgrades;
+        const safeUpgrades: Upgrades = {
+          damage: clampNum(rawU.damage, 0, MAX_UPGRADE_LEVEL),
+          cooldown: clampNum(rawU.cooldown, 0, MAX_UPGRADE_LEVEL),
+          speed: clampNum(rawU.speed, 0, MAX_UPGRADE_LEVEL),
+          health: clampNum(rawU.health, 0, MAX_UPGRADE_LEVEL),
+        };
+        const safeName = typeof p.name === "string" ? p.name.slice(0, 32) : "Player";
+        const safeColor = typeof p.color === "string" ? p.color.slice(0, 32) : colorFor(p.id);
+        const safeX = clampNum(p.x, -10000, 10000);
+        const safeY = clampNum(p.y, -10000, 10000);
         const existing = playersRef.current.get(p.id);
         if (existing) {
-          existing.x = p.x;
-          existing.y = p.y;
-          existing.hp = p.hp;
-          existing.maxHp = p.maxHp;
-          existing.kills = p.kills;
-          existing.name = p.name;
-          existing.color = p.color;
-          existing.upgrades = p.upgrades;
+          existing.x = safeX;
+          existing.y = safeY;
+          existing.hp = safeHp;
+          existing.maxHp = safeMaxHp;
+          existing.kills = safeKills;
+          existing.name = safeName;
+          existing.color = safeColor;
+          existing.upgrades = safeUpgrades;
         } else {
           playersRef.current.set(p.id, {
-            id: p.id, name: p.name, x: p.x, y: p.y,
-            color: p.color || colorFor(p.id),
-            hp: p.hp, maxHp: p.maxHp, kills: p.kills, upgrades: p.upgrades,
+            id: p.id, name: safeName, x: safeX, y: safeY,
+            color: safeColor || colorFor(p.id),
+            hp: safeHp, maxHp: safeMaxHp, kills: safeKills, upgrades: safeUpgrades,
           });
         }
       })
       .on("broadcast", { event: "fire" }, ({ payload }) => {
         const projectiles = (payload as { projectiles: Projectile[] }).projectiles;
-        // Adopt these projectiles for rendering only; do NOT do collision (shooter authoritative)
-        for (const pr of projectiles) projectilesRef.current.push({ ...pr });
+        // Adopt for rendering only; clamp dmg against the declared weapon so a
+        // forged 'fire' can't poison downstream collision math.
+        if (!Array.isArray(projectiles)) return;
+        for (const pr of projectiles.slice(0, 64)) {
+          const wDef = WEAPONS[pr?.weapon as WeaponId];
+          if (!wDef) continue;
+          const maxDmg = wDef.dmg * 2.5; // generous ceiling incl. upgrades/charge
+          const safeDmg = Math.max(0, Math.min(Number(pr.dmg) || 0, maxDmg));
+          projectilesRef.current.push({ ...pr, dmg: safeDmg });
+        }
       })
       .on("broadcast", { event: "swing" }, ({ payload }) => {
         const s = payload as SwingFx;
@@ -350,7 +379,16 @@ function RoomPage() {
         const { target, by, dmg, weapon } = payload as {
           target: string; by: string; dmg: number; weapon: WeaponId;
         };
-        applyDamage(target, by, dmg, weapon);
+        // Anti-cheat: validate weapon + clamp damage against weapon ceiling so
+        // a peer can't broadcast `dmg: Infinity` to one-shot everyone.
+        if (typeof target !== "string" || typeof by !== "string") return;
+        const wDef = WEAPONS[weapon];
+        if (!wDef) return;
+        // Allow headroom for upgrades and sniper charge (worst case ~ dmg * 1.5 * 2x charge).
+        const maxDmg = wDef.dmg * 3;
+        const n = typeof dmg === "number" && Number.isFinite(dmg) ? dmg : 0;
+        const safeDmg = Math.max(0, Math.min(n, maxDmg));
+        applyDamage(target, by, safeDmg, weapon);
       })
       .subscribe(async (status) => {
         if (status === "SUBSCRIBED") {
