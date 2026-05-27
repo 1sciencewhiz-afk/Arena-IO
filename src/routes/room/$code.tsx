@@ -313,6 +313,7 @@ function RoomPage() {
               maxHp: 100,
               kills: 0,
               upgrades: { ...ZERO_UPGRADES },
+              aim: 0,
             });
           }
         }
@@ -321,7 +322,7 @@ function RoomPage() {
       .on("broadcast", { event: "state" }, ({ payload }) => {
         const p = payload as {
           id: string; x: number; y: number; hp: number; maxHp: number; name: string;
-          kills: number; color: string; upgrades: Upgrades;
+          kills: number; color: string; upgrades: Upgrades; aim?: number;
         };
         // Validate / clamp incoming state so a malicious peer can't spoof huge
         // hp/kills/upgrade values that drive the scoreboard or UI.
@@ -344,6 +345,7 @@ function RoomPage() {
         const safeColor = typeof p.color === "string" ? p.color.slice(0, 32) : colorFor(p.id);
         const safeX = clampNum(p.x, -10000, 10000);
         const safeY = clampNum(p.y, -10000, 10000);
+        const safeAim = clampNum(p.aim, -Math.PI * 4, Math.PI * 4, 0);
         const existing = playersRef.current.get(p.id);
         if (existing) {
           existing.x = safeX;
@@ -354,11 +356,12 @@ function RoomPage() {
           existing.name = safeName;
           existing.color = safeColor;
           existing.upgrades = safeUpgrades;
+          existing.aim = safeAim;
         } else {
           playersRef.current.set(p.id, {
             id: p.id, name: safeName, x: safeX, y: safeY,
             color: safeColor || colorFor(p.id),
-            hp: safeHp, maxHp: safeMaxHp, kills: safeKills, upgrades: safeUpgrades,
+            hp: safeHp, maxHp: safeMaxHp, kills: safeKills, upgrades: safeUpgrades, aim: safeAim,
           });
         }
       })
