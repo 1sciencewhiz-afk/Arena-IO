@@ -1,0 +1,1 @@
+REVOKE EXECUTE ON FUNCTION public.validate_profile_progress() FROM PUBLIC, anon, authenticated;
