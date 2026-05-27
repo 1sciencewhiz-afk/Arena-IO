@@ -816,6 +816,32 @@ function RoomPage() {
         ctx.strokeStyle = "rgba(0,0,0,0.4)";
         ctx.lineWidth = 2; ctx.stroke();
 
+        // Eyes — two white dots offset toward the aim direction so others
+        // can see which way the player is facing.
+        const ang = p.aim ?? 0;
+        const eyeOffset = PLAYER_R * 0.45;          // distance from center toward front
+        const eyeSpread = PLAYER_R * 0.45;          // perpendicular spread
+        const fx = Math.cos(ang) * eyeOffset;
+        const fy = Math.sin(ang) * eyeOffset;
+        const px = -Math.sin(ang) * eyeSpread;
+        const py =  Math.cos(ang) * eyeSpread;
+        const eyeR = PLAYER_R * 0.22;
+        const pupilR = eyeR * 0.55;
+        for (const sgn of [-1, 1]) {
+          const ex = p.x + fx + px * sgn;
+          const ey = p.y + fy + py * sgn;
+          ctx.fillStyle = "#fff";
+          ctx.beginPath(); ctx.arc(ex, ey, eyeR, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = "#0b0b0b";
+          ctx.beginPath();
+          ctx.arc(
+            ex + Math.cos(ang) * (eyeR - pupilR),
+            ey + Math.sin(ang) * (eyeR - pupilR),
+            pupilR, 0, Math.PI * 2,
+          );
+          ctx.fill();
+        }
+
         ctx.fillStyle = "#fff";
         ctx.font = "600 13px system-ui";
         ctx.textAlign = "center";
@@ -874,6 +900,36 @@ function RoomPage() {
     setUpgradesUi(next);
     setPointsUi(pointsRef.current);
     setHpUi({ hp: self.hp, max: self.maxHp });
+  }
+
+  function rollWeapon() {
+    if (pointsRef.current < WEAPON_ROLL_COST) return;
+    // If you already own everything, the roll is wasted — block it.
+    if (ownedRef.current.size >= WEAPON_ORDER.length) return;
+    pointsRef.current -= WEAPON_ROLL_COST;
+    // Keep rolling until we get one we don't own (so a roll is never wasted).
+    let pick: WeaponId = rollRandomWeapon();
+    let guard = 0;
+    while (ownedRef.current.has(pick) && guard++ < 30) {
+      pick = rollRandomWeapon();
+    }
+    const isNew = !ownedRef.current.has(pick);
+    let refund = 0;
+    if (isNew) {
+      ownedRef.current.add(pick);
+      setOwnedUi(Array.from(ownedRef.current));
+      // Auto-equip newly rolled weapon
+      weaponRef.current = pick;
+      chargeStartRef.current = null;
+      setWeaponUi(pick);
+    } else {
+      // Safety: refund most of the cost if dupes ever slip through.
+      refund = Math.max(1, WEAPON_ROLL_COST - 1);
+      pointsRef.current += refund;
+    }
+    setPointsUi(pointsRef.current);
+    setRollFlash({ weapon: pick, isNew, refund });
+    window.setTimeout(() => setRollFlash(null), 2200);
   }
 
   const shareUrl = useMemo(() => {
