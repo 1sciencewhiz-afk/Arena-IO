@@ -5,6 +5,7 @@ type Vec = { dx: number; dy: number };
 
 type Props = {
   weapon: WeaponId;
+  ownedWeapons: WeaponId[];
   onMove: (v: Vec) => void;
   onAim: (v: Vec | null) => void;
   onFireDown: () => void;
@@ -91,7 +92,7 @@ function Joystick({
   return (
     <div
       ref={baseRef}
-      className={`pointer-events-auto fixed bottom-24 ${side === "left" ? "left-4" : "right-4"} h-32 w-32 touch-none select-none rounded-full border border-foreground/25 bg-background/40 backdrop-blur`}
+      className={`pointer-events-auto fixed bottom-20 ${side === "left" ? "left-4" : "right-4"} h-36 w-36 touch-none select-none rounded-full border border-foreground/25 bg-background/40 backdrop-blur`}
       style={{ touchAction: "none" }}
     >
       <div
@@ -101,7 +102,7 @@ function Joystick({
         }}
       />
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[10px] font-bold uppercase tracking-wider text-foreground/40">
-        {side === "left" ? "move" : "aim"}
+        {side === "left" ? "move" : "aim + fire"}
       </div>
     </div>
   );
@@ -109,6 +110,7 @@ function Joystick({
 
 export function TouchControls({
   weapon,
+  ownedWeapons,
   onMove,
   onAim,
   onFireDown,
@@ -116,40 +118,54 @@ export function TouchControls({
   onMelee,
   onSelectWeapon,
 }: Props) {
+  // Right joystick: while held in any direction, aim AND fire.
+  // Releasing the stick stops firing but keeps the last aim vector,
+  // so the player keeps facing the same way.
+  const firingRef = useRef(false);
+  const DEAD = 0.15;
+
   return (
     <>
       <Joystick side="left" onChange={onMove} />
-      {/* Sticky aim: keep last direction after release so the player keeps facing where they aimed. */}
       <Joystick
         side="right"
         onChange={(v) => {
-          if (v.dx !== 0 || v.dy !== 0) onAim(v);
+          const mag = Math.hypot(v.dx, v.dy);
+          if (mag > DEAD) {
+            onAim(v);
+            if (!firingRef.current) {
+              firingRef.current = true;
+              onFireDown();
+            }
+          } else if (firingRef.current) {
+            // Inside deadzone — stop firing but keep last aim
+            firingRef.current = false;
+            onFireUp();
+          }
+        }}
+        onEnd={() => {
+          if (firingRef.current) {
+            firingRef.current = false;
+            onFireUp();
+          }
         }}
       />
 
-      {/* Fire + Melee */}
-      <div className="pointer-events-auto fixed right-4 bottom-[260px] flex flex-col gap-2">
-        <button
-          onTouchStart={(e) => { e.preventDefault(); onFireDown(); }}
-          onTouchEnd={(e) => { e.preventDefault(); onFireUp(); }}
-          onTouchCancel={(e) => { e.preventDefault(); onFireUp(); }}
-          className="h-20 w-20 touch-none select-none rounded-full border-2 border-primary bg-primary/85 text-sm font-black text-primary-foreground shadow-xl active:scale-95"
-        >
-          FIRE
-        </button>
-        <button
-          onTouchStart={(e) => { e.preventDefault(); onMelee(); }}
-          className="h-14 w-20 touch-none select-none rounded-full border border-foreground/30 bg-background/40 text-xs font-bold text-foreground shadow-lg backdrop-blur active:scale-95"
-        >
-          MELEE
-        </button>
-      </div>
+      {/* Small melee button only — fire is now driven by the right joystick. */}
+      <button
+        onTouchStart={(e) => { e.preventDefault(); onMelee(); }}
+        className="pointer-events-auto fixed right-6 bottom-[200px] h-12 w-12 touch-none select-none rounded-full border border-foreground/30 bg-background/50 text-[10px] font-bold text-foreground shadow-lg backdrop-blur active:scale-95"
+      >
+        MELEE
+      </button>
 
-      {/* Weapon strip */}
+      {/* Weapon strip — only owned weapons are selectable */}
       <div className="pointer-events-auto fixed bottom-2 left-1/2 flex -translate-x-1/2 gap-1 rounded-full border border-foreground/15 bg-background/70 px-1.5 py-1 backdrop-blur">
         {WEAPON_ORDER.map((id) => {
           const w = WEAPONS[id];
           const active = weapon === id;
+          const owned = ownedWeapons.includes(id);
+          if (!owned) return null;
           return (
             <button
               key={id}
