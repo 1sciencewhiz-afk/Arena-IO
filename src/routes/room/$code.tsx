@@ -1003,26 +1003,34 @@ function RoomPage() {
               {WEAPON_ORDER.map((id) => {
                 const w = WEAPONS[id];
                 const active = weaponUi === id;
+                const owned = ownedUi.includes(id);
                 return (
                   <button
                     key={id}
+                    disabled={!owned}
                     onClick={() => {
+                      if (!owned) return;
                       weaponRef.current = id;
                       chargeStartRef.current = null;
                       setWeaponUi(id);
                     }}
                     className={`rounded-lg border p-2 text-left text-xs transition ${
-                      active
-                        ? "border-primary bg-primary/10 text-foreground"
-                        : "border-foreground/10 bg-foreground/5 text-foreground/70 hover:border-foreground/20"
+                      !owned
+                        ? "cursor-not-allowed border-foreground/10 bg-foreground/[0.02] text-foreground/30"
+                        : active
+                          ? "border-primary bg-primary/10 text-foreground"
+                          : "border-foreground/10 bg-foreground/5 text-foreground/70 hover:border-foreground/20"
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="font-bold">{w.name}</span>
+                      <span className="font-bold">{owned ? w.name : "???"}</span>
                       <span className="font-mono text-[10px] text-foreground/40">{w.key}</span>
                     </div>
-                    <div className="mt-0.5 text-[10px] text-foreground/50">
-                      {Math.round(w.dmg)} dmg
+                    <div
+                      className="mt-0.5 text-[10px] font-semibold"
+                      style={{ color: RARITY_META[w.rarity].color }}
+                    >
+                      {owned ? `${Math.round(w.dmg)} dmg · ${RARITY_META[w.rarity].label}` : "🔒 Locked"}
                     </div>
                   </button>
                 );
