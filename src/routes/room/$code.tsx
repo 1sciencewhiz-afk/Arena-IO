@@ -426,9 +426,11 @@ function RoomPage() {
       const idx = ["1", "2", "3", "4", "5", "6"].indexOf(key);
       if (idx >= 0) {
         const w = WEAPON_ORDER[idx];
-        weaponRef.current = w;
-        chargeStartRef.current = null;
-        setWeaponUi(w);
+        if (ownedRef.current.has(w)) {
+          weaponRef.current = w;
+          chargeStartRef.current = null;
+          setWeaponUi(w);
+        }
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
@@ -479,6 +481,7 @@ function RoomPage() {
       },
       melee: () => swingMelee(performance.now()),
       selectWeapon: (w) => {
+        if (!ownedRef.current.has(w)) return;
         weaponRef.current = w;
         chargeStartRef.current = null;
         setWeaponUi(w);
