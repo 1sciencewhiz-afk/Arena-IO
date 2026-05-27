@@ -18,6 +18,10 @@ import {
   cooldownMult,
   speedMult,
   maxHp,
+  rollRandomWeapon,
+  RARITY_META,
+  STARTING_WEAPONS,
+  WEAPON_ROLL_COST,
   type WeaponId,
   type Upgrades,
   type UpgradeId,
@@ -45,6 +49,7 @@ type Player = {
   maxHp: number;
   kills: number;
   upgrades: Upgrades;
+  aim: number; // radians — direction the player is facing
 };
 
 type Projectile = {
