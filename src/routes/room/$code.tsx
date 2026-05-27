@@ -1088,6 +1088,41 @@ function RoomPage() {
                   );
                 })}
               </ul>
+              <div className="mt-3 border-t border-foreground/10 pt-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold">Random weapon</div>
+                    <div className="text-[10px] text-foreground/50">
+                      Rarer = lower drop chance · Owned {ownedUi.length}/{WEAPON_ORDER.length}
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant={pointsUi >= WEAPON_ROLL_COST && ownedUi.length < WEAPON_ORDER.length ? "default" : "secondary"}
+                    disabled={pointsUi < WEAPON_ROLL_COST || ownedUi.length >= WEAPON_ORDER.length}
+                    onClick={rollWeapon}
+                  >
+                    {ownedUi.length >= WEAPON_ORDER.length ? "ALL" : `Roll (${WEAPON_ROLL_COST})`}
+                  </Button>
+                </div>
+                {rollFlash && (
+                  <div
+                    className="rounded-md border px-2 py-1 text-[11px]"
+                    style={{
+                      borderColor: RARITY_META[WEAPONS[rollFlash.weapon].rarity].color,
+                      color: RARITY_META[WEAPONS[rollFlash.weapon].rarity].color,
+                    }}
+                  >
+                    {rollFlash.isNew ? "🎉 Unlocked: " : "Duplicate: "}
+                    <span className="font-bold">{WEAPONS[rollFlash.weapon].name}</span>
+                    {" · "}
+                    {RARITY_META[WEAPONS[rollFlash.weapon].rarity].label}
+                    {!rollFlash.isNew && rollFlash.refund > 0 && (
+                      <span className="text-foreground/60"> (refund +{rollFlash.refund})</span>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="rounded-xl border border-foreground/10 bg-foreground/5 p-4">
