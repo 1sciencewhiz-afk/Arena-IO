@@ -95,6 +95,12 @@ function RoomPage() {
   const [showHelp, setShowHelp] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<null | "upgrades" | "scoreboard">(null);
+  const [ownedUi, setOwnedUi] = useState<WeaponId[]>([...STARTING_WEAPONS]);
+  const [rollFlash, setRollFlash] = useState<
+    | null
+    | { weapon: WeaponId; isNew: boolean; refund: number }
+  >(null);
+  const ownedRef = useRef<Set<WeaponId>>(new Set(STARTING_WEAPONS));
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -231,6 +237,7 @@ function RoomPage() {
       maxHp: 100,
       kills: 0,
       upgrades: { ...ZERO_UPGRADES },
+      aim: 0,
     };
     playersRef.current.set(me.id, me);
     setHpUi({ hp: me.hp, max: me.maxHp });
