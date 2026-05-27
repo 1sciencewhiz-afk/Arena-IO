@@ -18,6 +18,10 @@ import {
   cooldownMult,
   speedMult,
   maxHp,
+  rollRandomWeapon,
+  RARITY_META,
+  STARTING_WEAPONS,
+  WEAPON_ROLL_COST,
   type WeaponId,
   type Upgrades,
   type UpgradeId,
@@ -45,6 +49,7 @@ type Player = {
   maxHp: number;
   kills: number;
   upgrades: Upgrades;
+  aim: number; // radians — direction the player is facing
 };
 
 type Projectile = {
@@ -90,6 +95,12 @@ function RoomPage() {
   const [showHelp, setShowHelp] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<null | "upgrades" | "scoreboard">(null);
+  const [ownedUi, setOwnedUi] = useState<WeaponId[]>([...STARTING_WEAPONS]);
+  const [rollFlash, setRollFlash] = useState<
+    | null
+    | { weapon: WeaponId; isNew: boolean; refund: number }
+  >(null);
+  const ownedRef = useRef<Set<WeaponId>>(new Set(STARTING_WEAPONS));
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -226,6 +237,7 @@ function RoomPage() {
       maxHp: 100,
       kills: 0,
       upgrades: { ...ZERO_UPGRADES },
+      aim: 0,
     };
     playersRef.current.set(me.id, me);
     setHpUi({ hp: me.hp, max: me.maxHp });
@@ -301,6 +313,7 @@ function RoomPage() {
               maxHp: 100,
               kills: 0,
               upgrades: { ...ZERO_UPGRADES },
+              aim: 0,
             });
           }
         }
@@ -309,7 +322,7 @@ function RoomPage() {
       .on("broadcast", { event: "state" }, ({ payload }) => {
         const p = payload as {
           id: string; x: number; y: number; hp: number; maxHp: number; name: string;
-          kills: number; color: string; upgrades: Upgrades;
+          kills: number; color: string; upgrades: Upgrades; aim?: number;
         };
         // Validate / clamp incoming state so a malicious peer can't spoof huge
         // hp/kills/upgrade values that drive the scoreboard or UI.
@@ -332,6 +345,7 @@ function RoomPage() {
         const safeColor = typeof p.color === "string" ? p.color.slice(0, 32) : colorFor(p.id);
         const safeX = clampNum(p.x, -10000, 10000);
         const safeY = clampNum(p.y, -10000, 10000);
+        const safeAim = clampNum(p.aim, -Math.PI * 4, Math.PI * 4, 0);
         const existing = playersRef.current.get(p.id);
         if (existing) {
           existing.x = safeX;
@@ -342,11 +356,12 @@ function RoomPage() {
           existing.name = safeName;
           existing.color = safeColor;
           existing.upgrades = safeUpgrades;
+          existing.aim = safeAim;
         } else {
           playersRef.current.set(p.id, {
             id: p.id, name: safeName, x: safeX, y: safeY,
             color: safeColor || colorFor(p.id),
-            hp: safeHp, maxHp: safeMaxHp, kills: safeKills, upgrades: safeUpgrades,
+            hp: safeHp, maxHp: safeMaxHp, kills: safeKills, upgrades: safeUpgrades, aim: safeAim,
           });
         }
       })
@@ -411,9 +426,11 @@ function RoomPage() {
       const idx = ["1", "2", "3", "4", "5", "6"].indexOf(key);
       if (idx >= 0) {
         const w = WEAPON_ORDER[idx];
-        weaponRef.current = w;
-        chargeStartRef.current = null;
-        setWeaponUi(w);
+        if (ownedRef.current.has(w)) {
+          weaponRef.current = w;
+          chargeStartRef.current = null;
+          setWeaponUi(w);
+        }
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
@@ -464,6 +481,7 @@ function RoomPage() {
       },
       melee: () => swingMelee(performance.now()),
       selectWeapon: (w) => {
+        if (!ownedRef.current.has(w)) return;
         weaponRef.current = w;
         chargeStartRef.current = null;
         setWeaponUi(w);
@@ -636,6 +654,8 @@ function RoomPage() {
           self.x = Math.max(PLAYER_R, Math.min(ARENA_W - PLAYER_R, self.x));
           self.y = Math.max(PLAYER_R, Math.min(ARENA_H - PLAYER_R, self.y));
         }
+        // Keep our facing angle updated each frame so eyes track the cursor / joystick
+        self.aim = currentAimAngle(self);
         tryFire(now);
       }
 
@@ -699,7 +719,7 @@ function RoomPage() {
           payload: {
             id: self.id, name: self.name, x: self.x, y: self.y,
             hp: self.hp, maxHp: self.maxHp, kills: self.kills, color: self.color,
-            upgrades: self.upgrades,
+            upgrades: self.upgrades, aim: self.aim,
           },
         });
       }
@@ -796,6 +816,32 @@ function RoomPage() {
         ctx.strokeStyle = "rgba(0,0,0,0.4)";
         ctx.lineWidth = 2; ctx.stroke();
 
+        // Eyes — two white dots offset toward the aim direction so others
+        // can see which way the player is facing.
+        const ang = p.aim ?? 0;
+        const eyeOffset = PLAYER_R * 0.45;          // distance from center toward front
+        const eyeSpread = PLAYER_R * 0.45;          // perpendicular spread
+        const fx = Math.cos(ang) * eyeOffset;
+        const fy = Math.sin(ang) * eyeOffset;
+        const px = -Math.sin(ang) * eyeSpread;
+        const py =  Math.cos(ang) * eyeSpread;
+        const eyeR = PLAYER_R * 0.22;
+        const pupilR = eyeR * 0.55;
+        for (const sgn of [-1, 1]) {
+          const ex = p.x + fx + px * sgn;
+          const ey = p.y + fy + py * sgn;
+          ctx.fillStyle = "#fff";
+          ctx.beginPath(); ctx.arc(ex, ey, eyeR, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = "#0b0b0b";
+          ctx.beginPath();
+          ctx.arc(
+            ex + Math.cos(ang) * (eyeR - pupilR),
+            ey + Math.sin(ang) * (eyeR - pupilR),
+            pupilR, 0, Math.PI * 2,
+          );
+          ctx.fill();
+        }
+
         ctx.fillStyle = "#fff";
         ctx.font = "600 13px system-ui";
         ctx.textAlign = "center";
@@ -854,6 +900,36 @@ function RoomPage() {
     setUpgradesUi(next);
     setPointsUi(pointsRef.current);
     setHpUi({ hp: self.hp, max: self.maxHp });
+  }
+
+  function rollWeapon() {
+    if (pointsRef.current < WEAPON_ROLL_COST) return;
+    // If you already own everything, the roll is wasted — block it.
+    if (ownedRef.current.size >= WEAPON_ORDER.length) return;
+    pointsRef.current -= WEAPON_ROLL_COST;
+    // Keep rolling until we get one we don't own (so a roll is never wasted).
+    let pick: WeaponId = rollRandomWeapon();
+    let guard = 0;
+    while (ownedRef.current.has(pick) && guard++ < 30) {
+      pick = rollRandomWeapon();
+    }
+    const isNew = !ownedRef.current.has(pick);
+    let refund = 0;
+    if (isNew) {
+      ownedRef.current.add(pick);
+      setOwnedUi(Array.from(ownedRef.current));
+      // Auto-equip newly rolled weapon
+      weaponRef.current = pick;
+      chargeStartRef.current = null;
+      setWeaponUi(pick);
+    } else {
+      // Safety: refund most of the cost if dupes ever slip through.
+      refund = Math.max(1, WEAPON_ROLL_COST - 1);
+      pointsRef.current += refund;
+    }
+    setPointsUi(pointsRef.current);
+    setRollFlash({ weapon: pick, isNew, refund });
+    window.setTimeout(() => setRollFlash(null), 2200);
   }
 
   const shareUrl = useMemo(() => {
@@ -927,26 +1003,34 @@ function RoomPage() {
               {WEAPON_ORDER.map((id) => {
                 const w = WEAPONS[id];
                 const active = weaponUi === id;
+                const owned = ownedUi.includes(id);
                 return (
                   <button
                     key={id}
+                    disabled={!owned}
                     onClick={() => {
+                      if (!owned) return;
                       weaponRef.current = id;
                       chargeStartRef.current = null;
                       setWeaponUi(id);
                     }}
                     className={`rounded-lg border p-2 text-left text-xs transition ${
-                      active
-                        ? "border-primary bg-primary/10 text-foreground"
-                        : "border-foreground/10 bg-foreground/5 text-foreground/70 hover:border-foreground/20"
+                      !owned
+                        ? "cursor-not-allowed border-foreground/10 bg-foreground/[0.02] text-foreground/30"
+                        : active
+                          ? "border-primary bg-primary/10 text-foreground"
+                          : "border-foreground/10 bg-foreground/5 text-foreground/70 hover:border-foreground/20"
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="font-bold">{w.name}</span>
+                      <span className="font-bold">{owned ? w.name : "???"}</span>
                       <span className="font-mono text-[10px] text-foreground/40">{w.key}</span>
                     </div>
-                    <div className="mt-0.5 text-[10px] text-foreground/50">
-                      {Math.round(w.dmg)} dmg
+                    <div
+                      className="mt-0.5 text-[10px] font-semibold"
+                      style={{ color: RARITY_META[w.rarity].color }}
+                    >
+                      {owned ? `${Math.round(w.dmg)} dmg · ${RARITY_META[w.rarity].label}` : "🔒 Locked"}
                     </div>
                   </button>
                 );
@@ -1004,6 +1088,41 @@ function RoomPage() {
                   );
                 })}
               </ul>
+              <div className="mt-3 border-t border-foreground/10 pt-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold">Random weapon</div>
+                    <div className="text-[10px] text-foreground/50">
+                      Rarer = lower drop chance · Owned {ownedUi.length}/{WEAPON_ORDER.length}
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant={pointsUi >= WEAPON_ROLL_COST && ownedUi.length < WEAPON_ORDER.length ? "default" : "secondary"}
+                    disabled={pointsUi < WEAPON_ROLL_COST || ownedUi.length >= WEAPON_ORDER.length}
+                    onClick={rollWeapon}
+                  >
+                    {ownedUi.length >= WEAPON_ORDER.length ? "ALL" : `Roll (${WEAPON_ROLL_COST})`}
+                  </Button>
+                </div>
+                {rollFlash && (
+                  <div
+                    className="rounded-md border px-2 py-1 text-[11px]"
+                    style={{
+                      borderColor: RARITY_META[WEAPONS[rollFlash.weapon].rarity].color,
+                      color: RARITY_META[WEAPONS[rollFlash.weapon].rarity].color,
+                    }}
+                  >
+                    {rollFlash.isNew ? "🎉 Unlocked: " : "Duplicate: "}
+                    <span className="font-bold">{WEAPONS[rollFlash.weapon].name}</span>
+                    {" · "}
+                    {RARITY_META[WEAPONS[rollFlash.weapon].rarity].label}
+                    {!rollFlash.isNew && rollFlash.refund > 0 && (
+                      <span className="text-foreground/60"> (refund +{rollFlash.refund})</span>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="rounded-xl border border-foreground/10 bg-foreground/5 p-4">
@@ -1102,6 +1221,38 @@ function RoomPage() {
                         );
                       })}
                     </ul>
+                    <div className="mt-3 border-t border-foreground/10 pt-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold">Random weapon</div>
+                          <div className="text-[10px] text-foreground/50">
+                            Owned {ownedUi.length}/{WEAPON_ORDER.length} · rarer = lower drop
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant={pointsUi >= WEAPON_ROLL_COST && ownedUi.length < WEAPON_ORDER.length ? "default" : "secondary"}
+                          disabled={pointsUi < WEAPON_ROLL_COST || ownedUi.length >= WEAPON_ORDER.length}
+                          onClick={rollWeapon}
+                        >
+                          {ownedUi.length >= WEAPON_ORDER.length ? "ALL" : `Roll (${WEAPON_ROLL_COST})`}
+                        </Button>
+                      </div>
+                      {rollFlash && (
+                        <div
+                          className="mt-2 rounded-md border px-2 py-1 text-[11px]"
+                          style={{
+                            borderColor: RARITY_META[WEAPONS[rollFlash.weapon].rarity].color,
+                            color: RARITY_META[WEAPONS[rollFlash.weapon].rarity].color,
+                          }}
+                        >
+                          {rollFlash.isNew ? "🎉 Unlocked: " : "Duplicate: "}
+                          <span className="font-bold">{WEAPONS[rollFlash.weapon].name}</span>
+                          {" · "}
+                          {RARITY_META[WEAPONS[rollFlash.weapon].rarity].label}
+                        </div>
+                      )}
+                    </div>
                   </>
                 )}
                 {mobilePanel === "scoreboard" && (
@@ -1132,6 +1283,7 @@ function RoomPage() {
       {isTouch && controlsApiRef.current && (
         <TouchControls
           weapon={weaponUi}
+          ownedWeapons={ownedUi}
           onMove={(v) => controlsApiRef.current?.setMove(v)}
           onAim={(v) => controlsApiRef.current?.setAim(v)}
           onFireDown={() => controlsApiRef.current?.fireDown()}
