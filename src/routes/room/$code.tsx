@@ -654,6 +654,8 @@ function RoomPage() {
           self.x = Math.max(PLAYER_R, Math.min(ARENA_W - PLAYER_R, self.x));
           self.y = Math.max(PLAYER_R, Math.min(ARENA_H - PLAYER_R, self.y));
         }
+        // Keep our facing angle updated each frame so eyes track the cursor / joystick
+        self.aim = currentAimAngle(self);
         tryFire(now);
       }
 
@@ -717,7 +719,7 @@ function RoomPage() {
           payload: {
             id: self.id, name: self.name, x: self.x, y: self.y,
             hp: self.hp, maxHp: self.maxHp, kills: self.kills, color: self.color,
-            upgrades: self.upgrades,
+            upgrades: self.upgrades, aim: self.aim,
           },
         });
       }
