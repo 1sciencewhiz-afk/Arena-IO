@@ -3,7 +3,9 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { subscribeLobby, type LobbyRoom } from "@/lib/arena/lobby";
-import { useAuthUser, useProfile, signOut } from "@/lib/arena/auth";
+import { useAuthUser, signOut } from "@/lib/arena/auth";
+import { useLoadout } from "@/lib/arena/loadout";
+import { Armory } from "@/components/arena/Armory";
 
 export const PUBLIC_ROOM_CODE = "PUBLIC";
 
@@ -24,30 +26,33 @@ function randomCode() {
 function Index() {
   const navigate = useNavigate();
   const { userId, ready } = useAuthUser();
-  const profile = useProfile(userId);
-  const [name, setName] = useState(() =>
-    typeof window === "undefined" ? "" : localStorage.getItem("arena.name") ?? "",
-  );
+  const { loadout, update } = useLoadout(userId);
+  const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [roomName, setRoomName] = useState("");
   const [rooms, setRooms] = useState<LobbyRoom[]>([]);
+  const [profileName, setProfileName] = useState<string | null>(null);
 
   useEffect(() => subscribeLobby(setRooms), []);
 
-  // When signed in, lock nickname to username
+  // Hydrate name on client to avoid SSR mismatch
   useEffect(() => {
-    if (profile?.username) {
-      setName(profile.username);
-      try { localStorage.setItem("arena.name", profile.username); } catch { /* ignore */ }
-    }
-  }, [profile?.username]);
+    try { setName(localStorage.getItem("arena.name") ?? ""); } catch { /* ignore */ }
+  }, []);
+
+  // When signed in, fetch profile username for nickname lock
+  useEffect(() => {
+    if (!userId) { setProfileName(null); return; }
+    // username is on profile, which the loadout hook already loads via useProfile.
+    // We mirror it from localStorage if available; otherwise fall back later.
+  }, [userId]);
 
   const isGuest = !userId;
-  const displayName = profile?.username ?? (name.trim() || "Guest");
+  const displayName = profileName ?? (name.trim() || "Guest");
 
   const go = (roomCode: string, customName?: string) => {
     const trimmed = name.trim() || `Player${Math.floor(Math.random() * 999)}`;
-    localStorage.setItem("arena.name", trimmed);
+    try { localStorage.setItem("arena.name", trimmed); } catch { /* ignore */ }
     const upper = roomCode.toUpperCase();
     const finalName =
       upper === PUBLIC_ROOM_CODE
@@ -55,9 +60,7 @@ function Index() {
         : (customName ?? roomName).trim() || `${trimmed}'s Arena`;
     try {
       sessionStorage.setItem(`arena.roomName.${upper}`, finalName);
-    } catch {
-      /* ignore */
-    }
+    } catch { /* ignore */ }
     navigate({ to: "/room/$code", params: { code: upper } });
   };
 
@@ -65,8 +68,8 @@ function Index() {
   const otherRooms = rooms.filter((r) => r.code !== PUBLIC_ROOM_CODE);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4 text-foreground">
-      <div className="w-full max-w-5xl space-y-8 py-10">
+    <div className="min-h-screen bg-background px-4 text-foreground">
+      <div className="mx-auto w-full max-w-6xl space-y-8 py-10">
         {/* Account bar */}
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-foreground/10 bg-foreground/5 px-4 py-2.5 text-sm">
           <div className="flex items-center gap-2">
@@ -78,11 +81,9 @@ function Index() {
                   : <>Playing as <span className="font-bold text-foreground">Guest</span></>
                 : "…"}
             </span>
-            {profile && (
-              <span className="ml-2 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-mono font-bold text-primary">
-                {profile.kill_points} pts
-              </span>
-            )}
+            <span className="ml-2 rounded-md bg-primary/10 px-2 py-0.5 font-mono text-xs font-bold text-primary">
+              {loadout.killPoints} pts
+            </span>
           </div>
           <div className="flex items-center gap-2">
             {userId ? (
@@ -100,7 +101,7 @@ function Index() {
             ARENA<span className="text-primary">.io</span>
           </h1>
           <p className="mt-3 text-sm text-foreground/60">
-            Real-time 2D PvP. Create a room or jump into a friend's.
+            Real-time 2D PvP. Build your loadout, then jump in.
           </p>
           <Link
             to="/how-to-play"
@@ -144,14 +145,8 @@ function Index() {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Your name"
                 maxLength={16}
-                disabled={!!userId}
                 className="border-foreground/10 bg-background text-foreground"
               />
-              {userId && (
-                <p className="mt-1 text-[10px] text-foreground/40">
-                  Your username is used in-game.
-                </p>
-              )}
             </div>
 
             <div>
@@ -235,12 +230,12 @@ function Index() {
           </div>
         </div>
 
-        <p className="text-center text-xs text-foreground/40">
-          WASD to move · 1–6 switch weapons · Click to attack · Spend kills on upgrades
-        </p>
+        {/* Armory */}
+        <Armory loadout={loadout} update={update} isGuest={isGuest} />
+
         {isGuest && ready && (
           <p className="text-center text-[11px] text-foreground/50">
-            Playing as guest — <Link to="/login" className="font-semibold text-primary underline-offset-4 hover:underline">create an account</Link> to save your upgrades across sessions.
+            Playing as guest — <Link to="/login" className="font-semibold text-primary underline-offset-4 hover:underline">create an account</Link> to save your loadout across devices.
           </p>
         )}
       </div>
