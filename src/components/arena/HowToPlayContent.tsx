@@ -20,7 +20,7 @@ export function HowToPlayContent() {
               <li><b>WASD / Arrows</b> — move</li>
               <li><b>Mouse</b> — aim</li>
               <li><b>Left click</b> — attack (hold to auto-fire)</li>
-              <li><b>1–6</b> — switch weapon</li>
+              <li><b>1–4</b> — switch hotbar weapon</li>
               <li><b>Sniper</b> — hold to charge, release to fire</li>
             </ul>
           </div>
@@ -48,11 +48,16 @@ export function HowToPlayContent() {
             if (w.charge) meta.push(`charge ${w.charge}s`);
             if (w.melee) meta.push(`melee range ${w.melee.range}`);
             if (w.placeable) meta.push(`mine`);
+            if (w.homing) meta.push(`homing`);
+            if (w.bouncing) meta.push(`bouncing`);
+            if (w.pierce) meta.push(`pierces`);
+            if (w.immobilize) meta.push(`freeze ${w.immobilize}ms`);
+            if (w.summon) meta.push(`x${w.summon} summons`);
+            if (w.twin) meta.push(`twin barrel`);
             return (
               <li key={id} className="rounded-lg border border-foreground/10 bg-foreground/5 p-3">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-foreground">{w.name}</span>
-                  <span className="font-mono text-[10px] text-foreground/40">key {w.key}</span>
                 </div>
                 <div className="mt-1 text-xs text-foreground/60">{meta.join(" · ")}</div>
               </li>
