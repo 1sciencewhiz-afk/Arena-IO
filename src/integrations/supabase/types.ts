@@ -17,8 +17,11 @@ export type Database = {
       profiles: {
         Row: {
           created_at: string
+          hotbar: Json
           id: string
+          inventory: Json
           kill_points: number
+          storage_weapons: Json
           updated_at: string
           upgrades: Json
           user_id: string
@@ -26,8 +29,11 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          hotbar?: Json
           id?: string
+          inventory?: Json
           kill_points?: number
+          storage_weapons?: Json
           updated_at?: string
           upgrades?: Json
           user_id: string
@@ -35,8 +41,11 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          hotbar?: Json
           id?: string
+          inventory?: Json
           kill_points?: number
+          storage_weapons?: Json
           updated_at?: string
           upgrades?: Json
           user_id?: string

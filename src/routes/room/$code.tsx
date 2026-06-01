@@ -6,25 +6,20 @@ import { Button } from "@/components/ui/button";
 import { announceRoom } from "@/lib/arena/lobby";
 import { TouchControls } from "@/components/arena/TouchControls";
 import { HowToPlayContent } from "@/components/arena/HowToPlayContent";
-import { useAuthUser, useProfile, saveProfileProgress } from "@/lib/arena/auth";
+import { useAuthUser, useProfile } from "@/lib/arena/auth";
+import { useLoadout } from "@/lib/arena/loadout";
 import {
   WEAPONS,
   WEAPON_ORDER,
-  UPGRADE_DEFS,
   MAX_UPGRADE_LEVEL,
   ZERO_UPGRADES,
-  upgradeCost,
   dmgMult,
   cooldownMult,
   speedMult,
   maxHp,
-  rollRandomWeapon,
   RARITY_META,
-  STARTING_WEAPONS,
-  WEAPON_ROLL_COST,
   type WeaponId,
   type Upgrades,
-  type UpgradeId,
 } from "@/lib/arena/weapons";
 
 export const Route = createFileRoute("/room/$code")({
@@ -49,7 +44,8 @@ type Player = {
   maxHp: number;
   kills: number;
   upgrades: Upgrades;
-  aim: number; // radians — direction the player is facing
+  aim: number;
+  immobilizedUntil: number; // performance.now ms
 };
 
 type Projectile = {
@@ -64,10 +60,16 @@ type Projectile = {
   dmg: number;
   radius: number;
   splash?: number;
-  born: number; // performance.now
-  lifetime: number; // ms
-  armed?: number; // when mine arms (perf.now ms)
-  trigger?: number; // mine trigger radius
+  born: number;
+  lifetime: number;
+  armed?: number;        // mine arms at
+  trigger?: number;      // mine trigger radius
+  bouncesLeft?: number;  // grenade
+  fuseAt?: number;       // grenade explodes at
+  pierce?: boolean;      // spear
+  hitSet?: Set<string>;  // pierce: who already got hit
+  homing?: { turn: number; range: number };
+  immobilize?: number;   // ms freeze on hit
 };
 
 type SwingFx = { x: number; y: number; ang: number; range: number; arc: number; born: number; color: string };
@@ -79,29 +81,39 @@ function colorFor(id: string) {
   return `hsl(${h % 360} 85% 60%)`;
 }
 
+function emptyCooldowns(): Record<WeaponId, number> {
+  const out = {} as Record<WeaponId, number>;
+  for (const id of WEAPON_ORDER) out[id] = 0;
+  return out;
+}
+
 function RoomPage() {
   const { code } = Route.useParams();
   const { userId } = useAuthUser();
-  const profile = useProfile(userId);
+  const { profile } = useProfile(userId);
+  const { loadout, update: updateLoadout } = useLoadout(userId);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [connected, setConnected] = useState(false);
   const [scoreboard, setScoreboard] = useState<Player[]>([]);
   const [copied, setCopied] = useState(false);
   const [weaponUi, setWeaponUi] = useState<WeaponId>("pistol");
   const [hpUi, setHpUi] = useState({ hp: 100, max: 100 });
-  const [pointsUi, setPointsUi] = useState(0);
-  const [upgradesUi, setUpgradesUi] = useState<Upgrades>({ ...ZERO_UPGRADES });
+  const [matchKills, setMatchKills] = useState(0);
   const [isTouch, setIsTouch] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [mobilePanel, setMobilePanel] = useState<null | "upgrades" | "scoreboard">(null);
-  const [ownedUi, setOwnedUi] = useState<WeaponId[]>([...STARTING_WEAPONS]);
-  const [rollFlash, setRollFlash] = useState<
-    | null
-    | { weapon: WeaponId; isNew: boolean; refund: number }
-  >(null);
-  const ownedRef = useRef<Set<WeaponId>>(new Set(STARTING_WEAPONS));
+  const [showScoreboard, setShowScoreboard] = useState(false);
+  // Hydrate room name client-side to avoid SSR mismatch
+  const [roomName, setRoomName] = useState<string>(code);
   const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (code === "PUBLIC") { setRoomName("Public Arena"); return; }
+    try {
+      const stored = sessionStorage.getItem(`arena.roomName.${code}`);
+      if (stored) setRoomName(stored);
+    } catch { /* ignore */ }
+  }, [code]);
 
   useEffect(() => {
     const onChange = () => setIsFullscreen(!!document.fullscreenElement);
@@ -116,9 +128,7 @@ function RoomPage() {
       } else {
         await document.exitFullscreen();
       }
-    } catch {
-      /* ignore */
-    }
+    } catch { /* ignore */ }
   };
 
   useEffect(() => {
@@ -128,12 +138,6 @@ function RoomPage() {
       ((navigator as Navigator & { maxTouchPoints?: number }).maxTouchPoints ?? 0) > 0;
     setIsTouch(touchCapable && window.matchMedia("(pointer: coarse)").matches);
   }, []);
-
-  const roomName = useMemo(() => {
-    if (typeof window === "undefined") return code;
-    if (code === "PUBLIC") return "Public Arena";
-    return sessionStorage.getItem(`arena.roomName.${code}`) || code;
-  }, [code]);
 
   // Stable per-tab identity
   const meRef = useRef<{ id: string; name: string }>({
@@ -146,9 +150,9 @@ function RoomPage() {
       `Player${Math.floor(Math.random() * 999)}`,
   });
 
-  const profileAppliedRef = useRef(false);
-
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadoutAppliedRef = useRef(false);
+  const startKillPointsRef = useRef(0);
+  const matchKillsRef = useRef(0);
 
   // Game state in refs
   const playersRef = useRef<Map<string, Player>>(new Map());
@@ -159,14 +163,12 @@ function RoomPage() {
   const mouseRef = useRef({ x: ARENA_W / 2, y: ARENA_H / 2, down: false });
   const channelRef = useRef<RealtimeChannel | null>(null);
   const weaponRef = useRef<WeaponId>("pistol");
-  const lastFireRef = useRef<Record<WeaponId, number>>({
-    pistol: 0, shotgun: 0, sniper: 0, rocket: 0, mine: 0, sword: 0,
-  });
+  const lastFireRef = useRef<Record<WeaponId, number>>(emptyCooldowns());
   const chargeStartRef = useRef<number | null>(null);
-  const pointsRef = useRef(0);
   const upgradesRef = useRef<Upgrades>({ ...ZERO_UPGRADES });
+  const hotbarRef = useRef<WeaponId[]>(["pistol"]);
 
-  // Unified input refs (filled by mouse/keyboard or touch overlay)
+  // Unified input refs
   const moveVecRef = useRef<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
   const aimVecRef = useRef<{ dx: number; dy: number } | null>(null);
   const fireRef = useRef(false);
@@ -179,52 +181,67 @@ function RoomPage() {
     selectWeapon: (w: WeaponId) => void;
   } | null>(null);
 
-  // When the saved profile loads, apply username + persistent upgrades/points
+  // Apply loadout to self when it loads / changes
   useEffect(() => {
-    if (!profile || profileAppliedRef.current) return;
-    profileAppliedRef.current = true;
+    if (!loadout) return;
+    upgradesRef.current = { ...loadout.upgrades };
+    hotbarRef.current = loadout.hotbar.length ? [...loadout.hotbar] : ["pistol"];
+
+    // Ensure equipped weapon is in hotbar
+    if (!hotbarRef.current.includes(weaponRef.current)) {
+      weaponRef.current = hotbarRef.current[0];
+      setWeaponUi(weaponRef.current);
+    }
+
+    const self = playersRef.current.get(meRef.current.id);
+    if (self) {
+      self.upgrades = { ...loadout.upgrades };
+      const newMax = maxHp(loadout.upgrades);
+      if (newMax !== self.maxHp) {
+        self.hp = Math.min(self.hp, newMax);
+        self.maxHp = newMax;
+        setHpUi({ hp: self.hp, max: self.maxHp });
+      }
+    }
+
+    if (!loadoutAppliedRef.current) {
+      loadoutAppliedRef.current = true;
+      startKillPointsRef.current = loadout.killPoints;
+    }
+  }, [loadout]);
+
+  // Apply username on first profile load
+  useEffect(() => {
+    if (!profile?.username) return;
     meRef.current.name = profile.username;
     const self = playersRef.current.get(meRef.current.id);
     if (self) {
       self.name = profile.username;
-      self.upgrades = { ...profile.upgrades };
-      self.maxHp = maxHp(profile.upgrades);
-      self.hp = self.maxHp;
-      setHpUi({ hp: self.hp, max: self.maxHp });
       channelRef.current?.track({ name: self.name, color: self.color });
     }
-    upgradesRef.current = { ...profile.upgrades };
-    pointsRef.current = profile.kill_points;
-    setUpgradesUi({ ...profile.upgrades });
-    setPointsUi(profile.kill_points);
-  }, [profile]);
+  }, [profile?.username]);
 
-  // Debounced save of progress to the database (signed-in users only)
+  // Debounced save of accumulated match kills as kill points
   useEffect(() => {
-    if (!userId || !profileAppliedRef.current) return;
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      saveProfileProgress(userId, {
-        kill_points: pointsUi,
-        upgrades: upgradesUi,
-      }).catch(() => { /* ignore transient errors */ });
-    }, 600);
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    };
-  }, [userId, pointsUi, upgradesUi]);
+    const id = window.setTimeout(() => {
+      if (!loadoutAppliedRef.current) return;
+      if (matchKillsRef.current === 0) return;
+      const delta = matchKillsRef.current;
+      matchKillsRef.current = 0;
+      void updateLoadout({ killPoints: loadout.killPoints + delta });
+    }, 1500);
+    return () => window.clearTimeout(id);
+  }, [matchKills, loadout.killPoints, updateLoadout]);
 
   // Final flush on unmount
   useEffect(() => {
     return () => {
-      if (userId && profileAppliedRef.current) {
-        saveProfileProgress(userId, {
-          kill_points: pointsRef.current,
-          upgrades: upgradesRef.current,
-        }).catch(() => { /* ignore */ });
+      if (loadoutAppliedRef.current && matchKillsRef.current > 0) {
+        void updateLoadout({ killPoints: loadout.killPoints + matchKillsRef.current });
       }
     };
-  }, [userId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const me: Player = {
@@ -233,11 +250,12 @@ function RoomPage() {
       x: Math.random() * (ARENA_W - 200) + 100,
       y: Math.random() * (ARENA_H - 200) + 100,
       color: colorFor(meRef.current.id),
-      hp: 100,
-      maxHp: 100,
+      hp: maxHp(upgradesRef.current),
+      maxHp: maxHp(upgradesRef.current),
       kills: 0,
-      upgrades: { ...ZERO_UPGRADES },
+      upgrades: { ...upgradesRef.current },
       aim: 0,
+      immobilizedUntil: 0,
     };
     playersRef.current.set(me.id, me);
     setHpUi({ hp: me.hp, max: me.maxHp });
@@ -264,16 +282,21 @@ function RoomPage() {
       projectilesRef.current.push(p);
     }
 
-    function applyDamage(targetId: string, byId: string, dmg: number, weapon: WeaponId) {
+    function applyDamage(targetId: string, byId: string, dmg: number, weapon: WeaponId, immobilizeMs?: number) {
       const t = playersRef.current.get(targetId);
       if (!t || t.hp <= 0) return;
       t.hp = Math.max(0, t.hp - dmg);
+      if (immobilizeMs && targetId === me.id) {
+        t.immobilizedUntil = Math.max(t.immobilizedUntil, performance.now() + immobilizeMs);
+      } else if (immobilizeMs) {
+        t.immobilizedUntil = Math.max(t.immobilizedUntil, performance.now() + immobilizeMs);
+      }
       if (t.hp === 0) {
         const shooter = playersRef.current.get(byId);
         if (shooter) shooter.kills += 1;
         if (byId === me.id) {
-          pointsRef.current += 1;
-          setPointsUi(pointsRef.current);
+          matchKillsRef.current += 1;
+          setMatchKills(matchKillsRef.current);
         }
         if (targetId === me.id) {
           setTimeout(() => {
@@ -283,6 +306,7 @@ function RoomPage() {
               self.hp = self.maxHp;
               self.x = Math.random() * (ARENA_W - 200) + 100;
               self.y = Math.random() * (ARENA_H - 200) + 100;
+              self.immobilizedUntil = 0;
               setHpUi({ hp: self.hp, max: self.maxHp });
             }
           }, 1500);
@@ -292,6 +316,11 @@ function RoomPage() {
       updateScoreboard();
       void weapon;
     }
+
+    const clampNum = (v: unknown, min: number, max: number, def = 0) => {
+      const n = typeof v === "number" && Number.isFinite(v) ? v : def;
+      return Math.max(min, Math.min(max, n));
+    };
 
     channel
       .on("presence", { event: "sync" }, () => {
@@ -314,6 +343,7 @@ function RoomPage() {
               kills: 0,
               upgrades: { ...ZERO_UPGRADES },
               aim: 0,
+              immobilizedUntil: 0,
             });
           }
         }
@@ -324,13 +354,7 @@ function RoomPage() {
           id: string; x: number; y: number; hp: number; maxHp: number; name: string;
           kills: number; color: string; upgrades: Upgrades; aim?: number;
         };
-        // Validate / clamp incoming state so a malicious peer can't spoof huge
-        // hp/kills/upgrade values that drive the scoreboard or UI.
         if (!p || typeof p.id !== "string") return;
-        const clampNum = (v: unknown, min: number, max: number, def = 0) => {
-          const n = typeof v === "number" && Number.isFinite(v) ? v : def;
-          return Math.max(min, Math.min(max, n));
-        };
         const safeMaxHp = clampNum(p.maxHp, 1, 1000, 100);
         const safeHp = clampNum(p.hp, 0, safeMaxHp, safeMaxHp);
         const safeKills = clampNum(p.kills, 0, 100000, 0);
@@ -348,34 +372,34 @@ function RoomPage() {
         const safeAim = clampNum(p.aim, -Math.PI * 4, Math.PI * 4, 0);
         const existing = playersRef.current.get(p.id);
         if (existing) {
-          existing.x = safeX;
-          existing.y = safeY;
-          existing.hp = safeHp;
-          existing.maxHp = safeMaxHp;
+          existing.x = safeX; existing.y = safeY;
+          existing.hp = safeHp; existing.maxHp = safeMaxHp;
           existing.kills = safeKills;
-          existing.name = safeName;
-          existing.color = safeColor;
+          existing.name = safeName; existing.color = safeColor;
           existing.upgrades = safeUpgrades;
           existing.aim = safeAim;
         } else {
           playersRef.current.set(p.id, {
             id: p.id, name: safeName, x: safeX, y: safeY,
             color: safeColor || colorFor(p.id),
-            hp: safeHp, maxHp: safeMaxHp, kills: safeKills, upgrades: safeUpgrades, aim: safeAim,
+            hp: safeHp, maxHp: safeMaxHp, kills: safeKills,
+            upgrades: safeUpgrades, aim: safeAim, immobilizedUntil: 0,
           });
         }
       })
       .on("broadcast", { event: "fire" }, ({ payload }) => {
         const projectiles = (payload as { projectiles: Projectile[] }).projectiles;
-        // Adopt for rendering only; clamp dmg against the declared weapon so a
-        // forged 'fire' can't poison downstream collision math.
         if (!Array.isArray(projectiles)) return;
         for (const pr of projectiles.slice(0, 64)) {
           const wDef = WEAPONS[pr?.weapon as WeaponId];
           if (!wDef) continue;
-          const maxDmg = wDef.dmg * 2.5; // generous ceiling incl. upgrades/charge
+          const maxDmg = wDef.dmg * 3;
           const safeDmg = Math.max(0, Math.min(Number(pr.dmg) || 0, maxDmg));
-          projectilesRef.current.push({ ...pr, dmg: safeDmg });
+          projectilesRef.current.push({
+            ...pr,
+            dmg: safeDmg,
+            hitSet: undefined, // remote-rendered, local set not needed
+          });
         }
       })
       .on("broadcast", { event: "swing" }, ({ payload }) => {
@@ -391,19 +415,17 @@ function RoomPage() {
         projectilesRef.current = projectilesRef.current.filter((p) => !ids.has(p.id));
       })
       .on("broadcast", { event: "hit" }, ({ payload }) => {
-        const { target, by, dmg, weapon } = payload as {
-          target: string; by: string; dmg: number; weapon: WeaponId;
+        const { target, by, dmg, weapon, immobilize } = payload as {
+          target: string; by: string; dmg: number; weapon: WeaponId; immobilize?: number;
         };
-        // Anti-cheat: validate weapon + clamp damage against weapon ceiling so
-        // a peer can't broadcast `dmg: Infinity` to one-shot everyone.
         if (typeof target !== "string" || typeof by !== "string") return;
         const wDef = WEAPONS[weapon];
         if (!wDef) return;
-        // Allow headroom for upgrades and sniper charge (worst case ~ dmg * 1.5 * 2x charge).
         const maxDmg = wDef.dmg * 3;
         const n = typeof dmg === "number" && Number.isFinite(dmg) ? dmg : 0;
         const safeDmg = Math.max(0, Math.min(n, maxDmg));
-        applyDamage(target, by, safeDmg, weapon);
+        const safeImmo = Math.max(0, Math.min(Number(immobilize) || 0, 3000));
+        applyDamage(target, by, safeDmg, weapon, safeImmo || undefined);
       })
       .subscribe(async (status) => {
         if (status === "SUBSCRIBED") {
@@ -412,21 +434,19 @@ function RoomPage() {
         }
       });
 
-    // Announce this room to the lobby
     const stopAnnounce = announceRoom({
       roomCode: code,
       roomName,
       playerName: me.name,
     });
 
-    // Input
     const onKeyDown = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
       keysRef.current.add(key);
-      const idx = ["1", "2", "3", "4", "5", "6"].indexOf(key);
+      const idx = ["1", "2", "3", "4"].indexOf(key);
       if (idx >= 0) {
-        const w = WEAPON_ORDER[idx];
-        if (ownedRef.current.has(w)) {
+        const w = hotbarRef.current[idx];
+        if (w) {
           weaponRef.current = w;
           chargeStartRef.current = null;
           setWeaponUi(w);
@@ -451,7 +471,6 @@ function RoomPage() {
       if (weaponRef.current === "sniper") chargeStartRef.current = performance.now();
     };
     const onMouseUp = () => {
-      // Sniper: release to fire if charged
       if (weaponRef.current === "sniper" && chargeStartRef.current != null) {
         fireSniperRelease();
         chargeStartRef.current = null;
@@ -464,7 +483,6 @@ function RoomPage() {
     window.addEventListener("mouseup", onMouseUp);
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
-    // Imperative API for the touch overlay
     controlsApiRef.current = {
       setMove: (v) => { moveVecRef.current = v; },
       setAim: (v) => { aimVecRef.current = v; },
@@ -479,9 +497,16 @@ function RoomPage() {
         }
         fireRef.current = false;
       },
-      melee: () => swingMelee(performance.now()),
+      melee: () => {
+        // Tap melee triggers the equipped melee weapon if present; otherwise sword
+        const cur = weaponRef.current;
+        const wDef = WEAPONS[cur];
+        if (wDef.melee) swingMelee(performance.now(), cur);
+        else if (hotbarRef.current.includes("sword")) swingMelee(performance.now(), "sword");
+        else if (hotbarRef.current.includes("battleaxe")) swingMelee(performance.now(), "battleaxe");
+      },
       selectWeapon: (w) => {
-        if (!ownedRef.current.has(w)) return;
+        if (!hotbarRef.current.includes(w)) return;
         weaponRef.current = w;
         chargeStartRef.current = null;
         setWeaponUi(w);
@@ -503,20 +528,15 @@ function RoomPage() {
       const dmg = w.dmg * (0.4 + 0.6 * chargeRatio) * dmgMult(self.upgrades);
       const p: Projectile = {
         id: `${me.id}-s-${now}`,
-        owner: me.id,
-        ownerColor: self.color,
-        weapon: "sniper",
+        owner: me.id, ownerColor: self.color, weapon: "sniper",
         x: self.x + Math.cos(ang) * (PLAYER_R + 4),
         y: self.y + Math.sin(ang) * (PLAYER_R + 4),
         vx: Math.cos(ang) * w.speed,
         vy: Math.sin(ang) * w.speed,
-        dmg,
-        radius: w.radius,
-        born: now,
-        lifetime: w.lifetime,
+        dmg, radius: w.radius, born: now, lifetime: w.lifetime,
       };
       spawnProjectile(p);
-      channelRef.current?.send({ type: "broadcast", event: "fire", payload: { projectiles: [p] } });
+      channelRef.current?.send({ type: "broadcast", event: "fire", payload: { projectiles: [stripSet(p)] } });
     }
 
     function currentAimAngle(self: Player): number {
@@ -525,18 +545,19 @@ function RoomPage() {
       return Math.atan2(mouseRef.current.y - self.y, mouseRef.current.x - self.x);
     }
 
-    function swingMelee(now: number) {
+    function swingMelee(now: number, weaponId: WeaponId) {
       const self = playersRef.current.get(me.id);
       if (!self || self.hp <= 0) return;
-      const w = WEAPONS.sword;
+      const w = WEAPONS[weaponId];
+      if (!w.melee) return;
       const t = now / 1000;
       const cd = w.cooldown * cooldownMult(self.upgrades);
-      if (t - lastFireRef.current.sword < cd) return;
-      lastFireRef.current.sword = t;
+      if (t - lastFireRef.current[weaponId] < cd) return;
+      lastFireRef.current[weaponId] = t;
       const ang = currentAimAngle(self);
       const dmgScale = dmgMult(self.upgrades);
       const swing: SwingFx = {
-        x: self.x, y: self.y, ang, range: w.melee!.range, arc: w.melee!.arc,
+        x: self.x, y: self.y, ang, range: w.melee.range, arc: w.melee.arc,
         born: now, color: self.color,
       };
       swingsRef.current.push(swing);
@@ -546,17 +567,17 @@ function RoomPage() {
         const dx = other.x - self.x;
         const dy = other.y - self.y;
         const dist = Math.hypot(dx, dy);
-        if (dist > w.melee!.range + PLAYER_R) continue;
+        if (dist > w.melee.range + PLAYER_R) continue;
         const a = Math.atan2(dy, dx);
         let diff = a - ang;
         while (diff > Math.PI) diff -= Math.PI * 2;
         while (diff < -Math.PI) diff += Math.PI * 2;
-        if (Math.abs(diff) <= w.melee!.arc / 2) {
+        if (Math.abs(diff) <= w.melee.arc / 2) {
           const dmg = w.dmg * dmgScale;
-          applyDamage(other.id, me.id, dmg, "sword");
+          applyDamage(other.id, me.id, dmg, weaponId);
           channelRef.current?.send({
             type: "broadcast", event: "hit",
-            payload: { target: other.id, by: me.id, dmg, weapon: "sword" },
+            payload: { target: other.id, by: me.id, dmg, weapon: weaponId },
           });
         }
       }
@@ -566,39 +587,104 @@ function RoomPage() {
       const self = playersRef.current.get(me.id);
       if (!self || self.hp <= 0) return;
       if (!fireRef.current) return;
-      const w = WEAPONS[weaponRef.current];
+      const wId = weaponRef.current;
+      if (!hotbarRef.current.includes(wId)) return;
+      const w = WEAPONS[wId];
       const t = now / 1000;
       const cd = w.cooldown * cooldownMult(self.upgrades);
       if (t - lastFireRef.current[w.id] < cd) return;
-
-      // Sniper fires only on release; skip continuous fire
-      if (w.id === "sniper") return;
-
+      if (w.id === "sniper") return; // release-to-fire
       lastFireRef.current[w.id] = t;
       const ang = currentAimAngle(self);
       const dmgScale = dmgMult(self.upgrades);
 
-      if (w.melee) {
-        swingMelee(now);
-        void ang;
-        return;
-      }
+      if (w.melee) { swingMelee(now, w.id); return; }
 
       if (w.placeable) {
         const p: Projectile = {
           id: `${me.id}-m-${now}`,
-          owner: me.id, ownerColor: self.color, weapon: "mine",
+          owner: me.id, ownerColor: self.color, weapon: w.id,
           x: self.x, y: self.y, vx: 0, vy: 0,
           dmg: w.dmg * dmgScale, radius: w.radius, splash: w.splash,
           born: now, lifetime: w.lifetime,
           armed: now + w.placeable.armTime, trigger: w.placeable.trigger,
         };
         spawnProjectile(p);
-        channelRef.current?.send({ type: "broadcast", event: "fire", payload: { projectiles: [p] } });
+        channelRef.current?.send({ type: "broadcast", event: "fire", payload: { projectiles: [stripSet(p)] } });
         return;
       }
 
-      // Standard ranged: shotgun emits pellets, others single
+      // Mini soldiers: spawn `summon` homing helpers in a fan
+      if (w.summon) {
+        const batch: Projectile[] = [];
+        for (let i = 0; i < w.summon; i++) {
+          const fan = (i - (w.summon - 1) / 2) * 0.35;
+          const a = ang + fan;
+          const p: Projectile = {
+            id: `${me.id}-${w.id}-${now}-${i}`,
+            owner: me.id, ownerColor: self.color, weapon: w.id,
+            x: self.x + Math.cos(a) * (PLAYER_R + 4),
+            y: self.y + Math.sin(a) * (PLAYER_R + 4),
+            vx: Math.cos(a) * w.speed,
+            vy: Math.sin(a) * w.speed,
+            dmg: w.dmg * dmgScale,
+            radius: w.radius,
+            born: now, lifetime: w.lifetime,
+            homing: w.homing,
+          };
+          batch.push(p);
+          spawnProjectile(p);
+        }
+        channelRef.current?.send({ type: "broadcast", event: "fire", payload: { projectiles: batch.map(stripSet) } });
+        return;
+      }
+
+      // Twin barrel: dual pistols → two parallel bullets
+      if (w.twin) {
+        const batch: Projectile[] = [];
+        const perp = ang + Math.PI / 2;
+        for (const sgn of [-1, 1]) {
+          const ox = Math.cos(perp) * 6 * sgn;
+          const oy = Math.sin(perp) * 6 * sgn;
+          const p: Projectile = {
+            id: `${me.id}-${w.id}-${now}-${sgn}`,
+            owner: me.id, ownerColor: self.color, weapon: w.id,
+            x: self.x + Math.cos(ang) * (PLAYER_R + 4) + ox,
+            y: self.y + Math.sin(ang) * (PLAYER_R + 4) + oy,
+            vx: Math.cos(ang) * w.speed,
+            vy: Math.sin(ang) * w.speed,
+            dmg: w.dmg * dmgScale,
+            radius: w.radius,
+            born: now, lifetime: w.lifetime,
+          };
+          batch.push(p);
+          spawnProjectile(p);
+        }
+        channelRef.current?.send({ type: "broadcast", event: "fire", payload: { projectiles: batch.map(stripSet) } });
+        return;
+      }
+
+      // Grenade: bouncing + fused
+      if (w.bouncing) {
+        const p: Projectile = {
+          id: `${me.id}-${w.id}-${now}`,
+          owner: me.id, ownerColor: self.color, weapon: w.id,
+          x: self.x + Math.cos(ang) * (PLAYER_R + 4),
+          y: self.y + Math.sin(ang) * (PLAYER_R + 4),
+          vx: Math.cos(ang) * w.speed,
+          vy: Math.sin(ang) * w.speed,
+          dmg: w.dmg * dmgScale,
+          radius: w.radius, splash: w.splash,
+          born: now, lifetime: w.lifetime,
+          bouncesLeft: w.bouncing.bounces,
+          fuseAt: now + w.bouncing.fuse,
+        };
+        spawnProjectile(p);
+        channelRef.current?.send({ type: "broadcast", event: "fire", payload: { projectiles: [stripSet(p)] } });
+        return;
+      }
+
+      // Standard ranged
       const pellets = w.pellets ?? 1;
       const spread = w.spread ?? 0;
       const batch: Projectile[] = [];
@@ -615,13 +701,22 @@ function RoomPage() {
           dmg: w.dmg * dmgScale,
           radius: w.radius,
           splash: w.splash,
-          born: now,
-          lifetime: w.lifetime,
+          born: now, lifetime: w.lifetime,
+          homing: w.homing,
+          pierce: w.pierce,
+          hitSet: w.pierce ? new Set<string>() : undefined,
+          immobilize: w.immobilize,
         };
         batch.push(p);
         spawnProjectile(p);
       }
-      channelRef.current?.send({ type: "broadcast", event: "fire", payload: { projectiles: batch } });
+      channelRef.current?.send({ type: "broadcast", event: "fire", payload: { projectiles: batch.map(stripSet) } });
+    }
+
+    function stripSet(p: Projectile): Projectile {
+      const { hitSet: _hs, ...rest } = p;
+      void _hs;
+      return rest as Projectile;
     }
 
     const ctx = canvas.getContext("2d")!;
@@ -635,82 +730,153 @@ function RoomPage() {
 
       const self = playersRef.current.get(me.id);
       if (self && self.hp > 0) {
-        let dx = 0;
-        let dy = 0;
-        const k = keysRef.current;
-        if (k.has("w") || k.has("arrowup")) dy -= 1;
-        if (k.has("s") || k.has("arrowdown")) dy += 1;
-        if (k.has("a") || k.has("arrowleft")) dx -= 1;
-        if (k.has("d") || k.has("arrowright")) dx += 1;
-        if (dx === 0 && dy === 0) {
-          const tv = moveVecRef.current;
-          if (tv.dx !== 0 || tv.dy !== 0) { dx = tv.dx; dy = tv.dy; }
+        const frozen = self.immobilizedUntil > now;
+        let dx = 0; let dy = 0;
+        if (!frozen) {
+          const k = keysRef.current;
+          if (k.has("w") || k.has("arrowup")) dy -= 1;
+          if (k.has("s") || k.has("arrowdown")) dy += 1;
+          if (k.has("a") || k.has("arrowleft")) dx -= 1;
+          if (k.has("d") || k.has("arrowright")) dx += 1;
+          if (dx === 0 && dy === 0) {
+            const tv = moveVecRef.current;
+            if (tv.dx !== 0 || tv.dy !== 0) { dx = tv.dx; dy = tv.dy; }
+          }
+          if (dx || dy) {
+            const len = Math.hypot(dx, dy) || 1;
+            const sp = BASE_SPEED * speedMult(self.upgrades);
+            self.x += (dx / len) * sp * dt;
+            self.y += (dy / len) * sp * dt;
+            self.x = Math.max(PLAYER_R, Math.min(ARENA_W - PLAYER_R, self.x));
+            self.y = Math.max(PLAYER_R, Math.min(ARENA_H - PLAYER_R, self.y));
+          }
         }
-        if (dx || dy) {
-          const len = Math.hypot(dx, dy) || 1;
-          const sp = BASE_SPEED * speedMult(self.upgrades);
-          self.x += (dx / len) * sp * dt;
-          self.y += (dy / len) * sp * dt;
-          self.x = Math.max(PLAYER_R, Math.min(ARENA_W - PLAYER_R, self.x));
-          self.y = Math.max(PLAYER_R, Math.min(ARENA_H - PLAYER_R, self.y));
-        }
-        // Keep our facing angle updated each frame so eyes track the cursor / joystick
         self.aim = currentAimAngle(self);
         tryFire(now);
       }
 
-      // Update projectiles + shooter-authoritative collision
+      // Update projectiles + collision
       const alive: Projectile[] = [];
       for (const b of projectilesRef.current) {
-        if (now - b.born > b.lifetime) continue;
-        b.x += b.vx * dt;
-        b.y += b.vy * dt;
-        if (b.x < 0 || b.x > ARENA_W || b.y < 0 || b.y > ARENA_H) {
+        // Lifetime / fuse
+        if (now - b.born > b.lifetime) {
           if (b.splash && b.owner === me.id) explode(b);
           continue;
         }
+        if (b.fuseAt && now >= b.fuseAt && b.owner === me.id) {
+          explode(b);
+          channelRef.current?.send({
+            type: "broadcast", event: "despawn", payload: { ids: [b.id] },
+          });
+          continue;
+        }
 
-        // Only the shooter resolves hits
+        // Homing — adjust velocity toward nearest non-owner
+        if (b.homing && b.owner === me.id) {
+          let best: Player | null = null;
+          let bestD = b.homing.range;
+          for (const other of playersRef.current.values()) {
+            if (other.id === me.id || other.hp <= 0) continue;
+            const d = Math.hypot(other.x - b.x, other.y - b.y);
+            if (d < bestD) { best = other; bestD = d; }
+          }
+          if (best) {
+            const desired = Math.atan2(best.y - b.y, best.x - b.x);
+            const cur = Math.atan2(b.vy, b.vx);
+            let diff = desired - cur;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            const maxTurn = b.homing.turn * dt;
+            const turn = Math.max(-maxTurn, Math.min(maxTurn, diff));
+            const speed = Math.hypot(b.vx, b.vy) || 1;
+            const newAng = cur + turn;
+            b.vx = Math.cos(newAng) * speed;
+            b.vy = Math.sin(newAng) * speed;
+          }
+        }
+
+        b.x += b.vx * dt;
+        b.y += b.vy * dt;
+
+        // Wall handling
+        const offX = b.x < 0 || b.x > ARENA_W;
+        const offY = b.y < 0 || b.y > ARENA_H;
+        if (offX || offY) {
+          if (b.bouncesLeft && b.bouncesLeft > 0 && b.owner === me.id) {
+            if (offX) { b.vx = -b.vx; b.x = Math.max(0, Math.min(ARENA_W, b.x)); }
+            if (offY) { b.vy = -b.vy; b.y = Math.max(0, Math.min(ARENA_H, b.y)); }
+            b.bouncesLeft -= 1;
+          } else {
+            if (b.splash && b.owner === me.id) explode(b);
+            continue;
+          }
+        }
+
         if (b.owner === me.id) {
-          let hit = false;
-          // Mine: arms then triggers when a non-owner enters trigger radius
+          // Mine arms then triggers
           if (b.weapon === "mine") {
             if (b.armed && now >= b.armed) {
+              let trig = false;
               for (const other of playersRef.current.values()) {
                 if (other.id === me.id || other.hp <= 0) continue;
-                if (Math.hypot(other.x - b.x, other.y - b.y) < (b.trigger ?? 36)) {
-                  hit = true;
-                  break;
-                }
+                if (Math.hypot(other.x - b.x, other.y - b.y) < (b.trigger ?? 36)) { trig = true; break; }
+              }
+              if (trig) {
+                explode(b);
+                channelRef.current?.send({ type: "broadcast", event: "despawn", payload: { ids: [b.id] } });
+                continue;
               }
             }
           } else {
-            for (const other of playersRef.current.values()) {
-              if (other.id === me.id || other.hp <= 0) continue;
-              if (Math.hypot(other.x - b.x, other.y - b.y) < PLAYER_R + b.radius) {
-                hit = true;
-                break;
+            // Pierce: collide with everyone it hasn't yet, don't die
+            if (b.pierce) {
+              const hits: Player[] = [];
+              for (const other of playersRef.current.values()) {
+                if (other.id === me.id || other.hp <= 0) continue;
+                if (b.hitSet?.has(other.id)) continue;
+                if (Math.hypot(other.x - b.x, other.y - b.y) < PLAYER_R + b.radius) {
+                  hits.push(other);
+                }
+              }
+              for (const other of hits) {
+                b.hitSet?.add(other.id);
+                applyDamage(other.id, me.id, b.dmg, b.weapon, b.immobilize);
+                channelRef.current?.send({
+                  type: "broadcast", event: "hit",
+                  payload: { target: other.id, by: me.id, dmg: b.dmg, weapon: b.weapon, immobilize: b.immobilize },
+                });
+              }
+              // spear keeps flying; let lifetime handle it
+            } else {
+              let hit: Player | null = null;
+              for (const other of playersRef.current.values()) {
+                if (other.id === me.id || other.hp <= 0) continue;
+                if (Math.hypot(other.x - b.x, other.y - b.y) < PLAYER_R + b.radius) { hit = other; break; }
+              }
+              if (hit) {
+                if (b.splash) {
+                  explode(b);
+                } else {
+                  applyDamage(hit.id, me.id, b.dmg, b.weapon, b.immobilize);
+                  channelRef.current?.send({
+                    type: "broadcast", event: "hit",
+                    payload: { target: hit.id, by: me.id, dmg: b.dmg, weapon: b.weapon, immobilize: b.immobilize },
+                  });
+                }
+                channelRef.current?.send({ type: "broadcast", event: "despawn", payload: { ids: [b.id] } });
+                continue;
               }
             }
-          }
-          if (hit) {
-            explode(b);
-            channelRef.current?.send({
-              type: "broadcast", event: "despawn", payload: { ids: [b.id] },
-            });
-            continue;
           }
         }
         alive.push(b);
       }
       projectilesRef.current = alive;
 
-      // Trim swing/boom fx
       const t0 = now;
-      swingsRef.current = swingsRef.current.filter((s) => t0 - s.born < 180);
+      swingsRef.current = swingsRef.current.filter((s) => t0 - s.born < 220);
       boomsRef.current = boomsRef.current.filter((b) => t0 - b.born < 400);
 
-      // Broadcast our state ~20Hz
       if (self && now - lastBroadcast > 50) {
         lastBroadcast = now;
         channelRef.current?.send({
@@ -729,7 +895,6 @@ function RoomPage() {
     }
 
     function explode(b: Projectile) {
-      // Apply damage to all victims in radius (splash) or one direct
       const self = playersRef.current.get(me.id);
       if (!self) return;
       const isSplash = !!b.splash;
@@ -740,10 +905,10 @@ function RoomPage() {
         if (d < radius + PLAYER_R) {
           const falloff = isSplash ? Math.max(0.4, 1 - d / (radius + PLAYER_R)) : 1;
           const dmg = b.dmg * falloff;
-          applyDamage(other.id, me.id, dmg, b.weapon);
+          applyDamage(other.id, me.id, dmg, b.weapon, b.immobilize);
           channelRef.current?.send({
             type: "broadcast", event: "hit",
-            payload: { target: other.id, by: me.id, dmg, weapon: b.weapon },
+            payload: { target: other.id, by: me.id, dmg, weapon: b.weapon, immobilize: b.immobilize },
           });
         }
       }
@@ -769,7 +934,6 @@ function RoomPage() {
       ctx.lineWidth = 2;
       ctx.strokeRect(0, 0, ARENA_W, ARENA_H);
 
-      // Booms
       for (const b of boomsRef.current) {
         const age = (now - b.born) / 400;
         ctx.globalAlpha = Math.max(0, 1 - age);
@@ -778,7 +942,6 @@ function RoomPage() {
         ctx.globalAlpha = 1;
       }
 
-      // Projectiles
       for (const b of projectilesRef.current) {
         ctx.fillStyle = b.ownerColor || "#fff";
         if (b.weapon === "mine") {
@@ -786,18 +949,36 @@ function RoomPage() {
           ctx.strokeStyle = "rgba(255,255,255,0.7)";
           ctx.lineWidth = 2;
           ctx.beginPath(); ctx.arc(b.x, b.y, b.radius + 3, 0, Math.PI * 2); ctx.stroke();
-        } else if (b.weapon === "rocket") {
+        } else if (b.weapon === "rocket" || b.weapon === "nuke" || b.weapon === "tracking_missile") {
           ctx.beginPath(); ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2); ctx.fill();
           ctx.fillStyle = "rgba(255,180,60,0.7)";
           ctx.beginPath(); ctx.arc(b.x - b.vx * 0.01, b.y - b.vy * 0.01, b.radius * 0.8, 0, Math.PI * 2); ctx.fill();
+        } else if (b.weapon === "grenade") {
+          ctx.beginPath(); ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2); ctx.fill();
+          ctx.strokeStyle = "rgba(0,0,0,0.5)";
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        } else if (b.weapon === "spear") {
+          const ang = Math.atan2(b.vy, b.vx);
+          ctx.save();
+          ctx.translate(b.x, b.y); ctx.rotate(ang);
+          ctx.fillRect(-12, -2, 24, 4);
+          ctx.restore();
+        } else if (b.weapon === "chain") {
+          const ang = Math.atan2(b.vy, b.vx);
+          ctx.save();
+          ctx.translate(b.x, b.y); ctx.rotate(ang);
+          for (let i = -8; i <= 8; i += 4) {
+            ctx.beginPath(); ctx.arc(i, 0, 2.5, 0, Math.PI * 2); ctx.fill();
+          }
+          ctx.restore();
         } else {
           ctx.beginPath(); ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2); ctx.fill();
         }
       }
 
-      // Swings
       for (const s of swingsRef.current) {
-        const age = (now - s.born) / 180;
+        const age = (now - s.born) / 220;
         ctx.globalAlpha = Math.max(0, 1 - age);
         ctx.fillStyle = s.color;
         ctx.beginPath();
@@ -808,7 +989,6 @@ function RoomPage() {
         ctx.globalAlpha = 1;
       }
 
-      // Players
       for (const p of playersRef.current.values()) {
         if (p.hp <= 0) continue;
         ctx.fillStyle = p.color;
@@ -816,11 +996,16 @@ function RoomPage() {
         ctx.strokeStyle = "rgba(0,0,0,0.4)";
         ctx.lineWidth = 2; ctx.stroke();
 
-        // Eyes — two white dots offset toward the aim direction so others
-        // can see which way the player is facing.
+        // Frozen ring if immobilized
+        if (p.immobilizedUntil > now) {
+          ctx.strokeStyle = "#7dd3fc";
+          ctx.lineWidth = 3;
+          ctx.beginPath(); ctx.arc(p.x, p.y, PLAYER_R + 5, 0, Math.PI * 2); ctx.stroke();
+        }
+
         const ang = p.aim ?? 0;
-        const eyeOffset = PLAYER_R * 0.45;          // distance from center toward front
-        const eyeSpread = PLAYER_R * 0.45;          // perpendicular spread
+        const eyeOffset = PLAYER_R * 0.45;
+        const eyeSpread = PLAYER_R * 0.45;
         const fx = Math.cos(ang) * eyeOffset;
         const fy = Math.sin(ang) * eyeOffset;
         const px = -Math.sin(ang) * eyeSpread;
@@ -854,7 +1039,6 @@ function RoomPage() {
         ctx.fillRect(p.x - w / 2, p.y - PLAYER_R - 8, (w * p.hp) / p.maxHp, 4);
       }
 
-      // Sniper charge ring on self
       if (self && self.hp > 0 && weaponRef.current === "sniper" && chargeStartRef.current != null) {
         const ms = now - chargeStartRef.current;
         const ratio = Math.min(1, ms / ((WEAPONS.sniper.charge ?? 0.6) * 1000));
@@ -881,61 +1065,13 @@ function RoomPage() {
     };
   }, [code, roomName]);
 
-  function buyUpgrade(id: UpgradeId) {
-    const self = playersRef.current.get(meRef.current.id);
-    if (!self) return;
-    const lvl = upgradesRef.current[id];
-    if (lvl >= MAX_UPGRADE_LEVEL) return;
-    const cost = upgradeCost(lvl);
-    if (pointsRef.current < cost) return;
-    pointsRef.current -= cost;
-    const next = { ...upgradesRef.current, [id]: lvl + 1 };
-    upgradesRef.current = next;
-    self.upgrades = next;
-    const newMax = maxHp(next);
-    if (id === "health") {
-      self.hp = self.hp + (newMax - self.maxHp);
-    }
-    self.maxHp = newMax;
-    setUpgradesUi(next);
-    setPointsUi(pointsRef.current);
-    setHpUi({ hp: self.hp, max: self.maxHp });
-  }
-
-  function rollWeapon() {
-    if (pointsRef.current < WEAPON_ROLL_COST) return;
-    // If you already own everything, the roll is wasted — block it.
-    if (ownedRef.current.size >= WEAPON_ORDER.length) return;
-    pointsRef.current -= WEAPON_ROLL_COST;
-    // Keep rolling until we get one we don't own (so a roll is never wasted).
-    let pick: WeaponId = rollRandomWeapon();
-    let guard = 0;
-    while (ownedRef.current.has(pick) && guard++ < 30) {
-      pick = rollRandomWeapon();
-    }
-    const isNew = !ownedRef.current.has(pick);
-    let refund = 0;
-    if (isNew) {
-      ownedRef.current.add(pick);
-      setOwnedUi(Array.from(ownedRef.current));
-      // Auto-equip newly rolled weapon
-      weaponRef.current = pick;
-      chargeStartRef.current = null;
-      setWeaponUi(pick);
-    } else {
-      // Safety: refund most of the cost if dupes ever slip through.
-      refund = Math.max(1, WEAPON_ROLL_COST - 1);
-      pointsRef.current += refund;
-    }
-    setPointsUi(pointsRef.current);
-    setRollFlash({ weapon: pick, isNew, refund });
-    window.setTimeout(() => setRollFlash(null), 2200);
-  }
-
   const shareUrl = useMemo(() => {
     if (typeof window === "undefined") return "";
     return `${window.location.origin}/room/${code}`;
   }, [code]);
+
+  const hotbar = loadout.hotbar;
+  void startKillPointsRef; // referenced for future use
 
   return (
     <div
@@ -997,41 +1133,40 @@ function RoomPage() {
                 style={isTouch ? undefined : { aspectRatio: `${ARENA_W} / ${ARENA_H}` }}
               />
             </div>
-            {/* Weapon HUD (desktop only) */}
+            {/* Hotbar (desktop) */}
             {!isTouch && (
-            <div className="grid grid-cols-6 gap-2">
-              {WEAPON_ORDER.map((id) => {
-                const w = WEAPONS[id];
-                const active = weaponUi === id;
-                const owned = ownedUi.includes(id);
+            <div className="grid grid-cols-4 gap-2">
+              {Array.from({ length: 4 }).map((_, i) => {
+                const id = hotbar[i];
+                const w = id ? WEAPONS[id] : null;
+                const active = id && weaponUi === id;
                 return (
                   <button
-                    key={id}
-                    disabled={!owned}
+                    key={i}
+                    disabled={!id}
                     onClick={() => {
-                      if (!owned) return;
+                      if (!id) return;
                       weaponRef.current = id;
                       chargeStartRef.current = null;
                       setWeaponUi(id);
                     }}
                     className={`rounded-lg border p-2 text-left text-xs transition ${
-                      !owned
-                        ? "cursor-not-allowed border-foreground/10 bg-foreground/[0.02] text-foreground/30"
+                      !id
+                        ? "cursor-not-allowed border-dashed border-foreground/10 bg-foreground/[0.02] text-foreground/30"
                         : active
                           ? "border-primary bg-primary/10 text-foreground"
                           : "border-foreground/10 bg-foreground/5 text-foreground/70 hover:border-foreground/20"
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="font-bold">{owned ? w.name : "???"}</span>
-                      <span className="font-mono text-[10px] text-foreground/40">{w.key}</span>
+                      <span className="font-bold">{w?.name ?? "Empty"}</span>
+                      <span className="font-mono text-[10px] text-foreground/40">{i + 1}</span>
                     </div>
-                    <div
-                      className="mt-0.5 text-[10px] font-semibold"
-                      style={{ color: RARITY_META[w.rarity].color }}
-                    >
-                      {owned ? `${Math.round(w.dmg)} dmg · ${RARITY_META[w.rarity].label}` : "🔒 Locked"}
-                    </div>
+                    {w && (
+                      <div className="mt-0.5 text-[10px] font-semibold" style={{ color: RARITY_META[w.rarity].color }}>
+                        {Math.round(w.dmg)} dmg · {RARITY_META[w.rarity].label}
+                      </div>
+                    )}
                   </button>
                 );
               })}
@@ -1055,74 +1190,16 @@ function RoomPage() {
                 />
               </div>
               <div className="mt-3 flex items-center justify-between text-sm">
-                <span className="text-foreground/70">Kill points</span>
-                <span className="font-mono font-bold text-primary">{pointsUi}</span>
+                <span className="text-foreground/70">This match</span>
+                <span className="font-mono font-bold text-primary">+{matchKills} pts</span>
               </div>
-            </div>
-
-            <div className="rounded-xl border border-foreground/10 bg-foreground/5 p-4">
-              <h2 className="mb-2 text-xs uppercase tracking-wider text-foreground/60">Upgrades</h2>
-              <ul className="space-y-2">
-                {UPGRADE_DEFS.map((u) => {
-                  const lvl = upgradesUi[u.id];
-                  const maxed = lvl >= MAX_UPGRADE_LEVEL;
-                  const cost = maxed ? 0 : upgradeCost(lvl);
-                  const can = !maxed && pointsUi >= cost;
-                  return (
-                    <li key={u.id} className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="text-sm font-semibold">{u.name}</div>
-                        <div className="text-[10px] text-foreground/50">
-                          Lv {lvl}/{MAX_UPGRADE_LEVEL} · {u.desc}
-                        </div>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant={can ? "default" : "secondary"}
-                        disabled={!can}
-                        onClick={() => buyUpgrade(u.id)}
-                      >
-                        {maxed ? "MAX" : `+1 (${cost})`}
-                      </Button>
-                    </li>
-                  );
-                })}
-              </ul>
-              <div className="mt-3 border-t border-foreground/10 pt-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold">Random weapon</div>
-                    <div className="text-[10px] text-foreground/50">
-                      Rarer = lower drop chance · Owned {ownedUi.length}/{WEAPON_ORDER.length}
-                    </div>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant={pointsUi >= WEAPON_ROLL_COST && ownedUi.length < WEAPON_ORDER.length ? "default" : "secondary"}
-                    disabled={pointsUi < WEAPON_ROLL_COST || ownedUi.length >= WEAPON_ORDER.length}
-                    onClick={rollWeapon}
-                  >
-                    {ownedUi.length >= WEAPON_ORDER.length ? "ALL" : `Roll (${WEAPON_ROLL_COST})`}
-                  </Button>
-                </div>
-                {rollFlash && (
-                  <div
-                    className="rounded-md border px-2 py-1 text-[11px]"
-                    style={{
-                      borderColor: RARITY_META[WEAPONS[rollFlash.weapon].rarity].color,
-                      color: RARITY_META[WEAPONS[rollFlash.weapon].rarity].color,
-                    }}
-                  >
-                    {rollFlash.isNew ? "🎉 Unlocked: " : "Duplicate: "}
-                    <span className="font-bold">{WEAPONS[rollFlash.weapon].name}</span>
-                    {" · "}
-                    {RARITY_META[WEAPONS[rollFlash.weapon].rarity].label}
-                    {!rollFlash.isNew && rollFlash.refund > 0 && (
-                      <span className="text-foreground/60"> (refund +{rollFlash.refund})</span>
-                    )}
-                  </div>
-                )}
+              <div className="mt-1 flex items-center justify-between text-xs text-foreground/50">
+                <span>Bank</span>
+                <span className="font-mono">{loadout.killPoints} pts</span>
               </div>
+              <p className="mt-2 text-[10px] text-foreground/40">
+                Upgrades & weapon crates are in the lobby Armory.
+              </p>
             </div>
 
             <div className="rounded-xl border border-foreground/10 bg-foreground/5 p-4">
@@ -1131,10 +1208,7 @@ function RoomPage() {
                 {scoreboard.map((p) => (
                   <li key={p.id} className="flex items-center justify-between text-sm">
                     <span className="flex items-center gap-2 truncate">
-                      <span
-                        className="inline-block h-3 w-3 rounded-full"
-                        style={{ backgroundColor: p.color }}
-                      />
+                      <span className="inline-block h-3 w-3 rounded-full" style={{ backgroundColor: p.color }} />
                       <span className="truncate">{p.name}</span>
                     </span>
                     <span className="font-mono font-bold">{p.kills}</span>
@@ -1150,7 +1224,7 @@ function RoomPage() {
               <div className="mb-1 font-semibold text-foreground/80">Controls</div>
               <div>WASD / Arrows — Move</div>
               <div>Mouse — Aim · Click — Attack</div>
-              <div>1–6 — Switch weapon</div>
+              <div>1–4 — Switch hotbar weapon</div>
               <div>Sniper: hold to charge, release to fire</div>
             </div>
           </aside>
@@ -1172,14 +1246,11 @@ function RoomPage() {
               </div>
             </div>
             <div className="pointer-events-auto flex gap-1">
+              <div className="rounded-md bg-background/60 px-2 py-1 text-[10px] font-bold backdrop-blur">
+                ★ +{matchKills}
+              </div>
               <button
-                onClick={() => setMobilePanel(mobilePanel === "upgrades" ? null : "upgrades")}
-                className="rounded-md bg-background/60 px-2 py-1 text-[10px] font-bold backdrop-blur"
-              >
-                ★ {pointsUi}
-              </button>
-              <button
-                onClick={() => setMobilePanel(mobilePanel === "scoreboard" ? null : "scoreboard")}
+                onClick={() => setShowScoreboard((v) => !v)}
                 className="rounded-md bg-background/60 px-2 py-1 text-[10px] font-bold backdrop-blur"
               >
                 ⚑ {scoreboard.length}
@@ -1187,93 +1258,33 @@ function RoomPage() {
             </div>
           </div>
 
-          {mobilePanel && (
+          {showScoreboard && (
             <div
               className="fixed inset-0 z-50 flex items-end bg-background/60 backdrop-blur"
-              onClick={() => setMobilePanel(null)}
+              onClick={() => setShowScoreboard(false)}
             >
               <div
                 className="max-h-[70vh] w-full overflow-y-auto rounded-t-2xl border-t border-foreground/10 bg-background p-4"
                 onClick={(e) => e.stopPropagation()}
               >
-                {mobilePanel === "upgrades" && (
-                  <>
-                    <div className="mb-3 flex items-center justify-between">
-                      <h3 className="text-sm font-bold uppercase tracking-wider">Upgrades</h3>
-                      <span className="font-mono text-sm text-primary">★ {pointsUi}</span>
-                    </div>
-                    <ul className="space-y-2">
-                      {UPGRADE_DEFS.map((u) => {
-                        const lvl = upgradesUi[u.id];
-                        const maxed = lvl >= MAX_UPGRADE_LEVEL;
-                        const cost = maxed ? 0 : upgradeCost(lvl);
-                        const can = !maxed && pointsUi >= cost;
-                        return (
-                          <li key={u.id} className="flex items-center justify-between gap-2">
-                            <div className="min-w-0">
-                              <div className="text-sm font-semibold">{u.name}</div>
-                              <div className="text-[10px] text-foreground/50">Lv {lvl}/{MAX_UPGRADE_LEVEL}</div>
-                            </div>
-                            <Button size="sm" variant={can ? "default" : "secondary"} disabled={!can} onClick={() => buyUpgrade(u.id)}>
-                              {maxed ? "MAX" : `+1 (${cost})`}
-                            </Button>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                    <div className="mt-3 border-t border-foreground/10 pt-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="text-sm font-semibold">Random weapon</div>
-                          <div className="text-[10px] text-foreground/50">
-                            Owned {ownedUi.length}/{WEAPON_ORDER.length} · rarer = lower drop
-                          </div>
-                        </div>
-                        <Button
-                          size="sm"
-                          variant={pointsUi >= WEAPON_ROLL_COST && ownedUi.length < WEAPON_ORDER.length ? "default" : "secondary"}
-                          disabled={pointsUi < WEAPON_ROLL_COST || ownedUi.length >= WEAPON_ORDER.length}
-                          onClick={rollWeapon}
-                        >
-                          {ownedUi.length >= WEAPON_ORDER.length ? "ALL" : `Roll (${WEAPON_ROLL_COST})`}
-                        </Button>
-                      </div>
-                      {rollFlash && (
-                        <div
-                          className="mt-2 rounded-md border px-2 py-1 text-[11px]"
-                          style={{
-                            borderColor: RARITY_META[WEAPONS[rollFlash.weapon].rarity].color,
-                            color: RARITY_META[WEAPONS[rollFlash.weapon].rarity].color,
-                          }}
-                        >
-                          {rollFlash.isNew ? "🎉 Unlocked: " : "Duplicate: "}
-                          <span className="font-bold">{WEAPONS[rollFlash.weapon].name}</span>
-                          {" · "}
-                          {RARITY_META[WEAPONS[rollFlash.weapon].rarity].label}
-                        </div>
-                      )}
-                    </div>
-                  </>
-                )}
-                {mobilePanel === "scoreboard" && (
-                  <>
-                    <div className="mb-3 flex items-center justify-between">
-                      <h3 className="text-sm font-bold uppercase tracking-wider">Scoreboard</h3>
-                      <span className="font-mono text-xs text-foreground/50">{roomName} · {code}</span>
-                    </div>
-                    <ul className="space-y-1.5">
-                      {scoreboard.map((p) => (
-                        <li key={p.id} className="flex items-center justify-between text-sm">
-                          <span className="flex items-center gap-2 truncate">
-                            <span className="inline-block h-3 w-3 rounded-full" style={{ backgroundColor: p.color }} />
-                            <span className="truncate">{p.name}</span>
-                          </span>
-                          <span className="font-mono font-bold">{p.kills}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </>
-                )}
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-sm font-bold uppercase tracking-wider">Scoreboard</h3>
+                  <span className="font-mono text-xs text-foreground/50">{roomName} · {code}</span>
+                </div>
+                <ul className="space-y-1.5">
+                  {scoreboard.map((p) => (
+                    <li key={p.id} className="flex items-center justify-between text-sm">
+                      <span className="flex items-center gap-2 truncate">
+                        <span className="inline-block h-3 w-3 rounded-full" style={{ backgroundColor: p.color }} />
+                        <span className="truncate">{p.name}</span>
+                      </span>
+                      <span className="font-mono font-bold">{p.kills}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-3 text-center text-[11px] text-foreground/50">
+                  Leave the room to spend points in the Armory.
+                </p>
               </div>
             </div>
           )}
@@ -1283,7 +1294,7 @@ function RoomPage() {
       {isTouch && controlsApiRef.current && (
         <TouchControls
           weapon={weaponUi}
-          ownedWeapons={ownedUi}
+          ownedWeapons={hotbar}
           onMove={(v) => controlsApiRef.current?.setMove(v)}
           onAim={(v) => controlsApiRef.current?.setAim(v)}
           onFireDown={() => controlsApiRef.current?.fireDown()}
@@ -1304,7 +1315,7 @@ function RoomPage() {
           >
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-xl font-black">How to play</h2>
-              <Button size="sm" variant="ghost" onClick={() => setShowHelp(false)}>Close</Button>
+              <Button variant="ghost" size="sm" onClick={() => setShowHelp(false)}>✕</Button>
             </div>
             <HowToPlayContent />
           </div>
