@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { subscribeLobby, type LobbyRoom } from "@/lib/arena/lobby";
-import { useAuthUser, signOut } from "@/lib/arena/auth";
+import { useAuthUser, useProfile, signOut } from "@/lib/arena/auth";
 import { useLoadout } from "@/lib/arena/loadout";
 import { Armory } from "@/components/arena/Armory";
 
@@ -26,13 +26,12 @@ function randomCode() {
 function Index() {
   const navigate = useNavigate();
   const { userId, ready } = useAuthUser();
+  const { profile } = useProfile(userId);
   const { loadout, update } = useLoadout(userId);
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [roomName, setRoomName] = useState("");
   const [rooms, setRooms] = useState<LobbyRoom[]>([]);
-  const [profileName, setProfileName] = useState<string | null>(null);
-
   useEffect(() => subscribeLobby(setRooms), []);
 
   // Hydrate name on client to avoid SSR mismatch
@@ -40,15 +39,16 @@ function Index() {
     try { setName(localStorage.getItem("arena.name") ?? ""); } catch { /* ignore */ }
   }, []);
 
-  // When signed in, fetch profile username for nickname lock
+  // Sync nickname to username when signed in
   useEffect(() => {
-    if (!userId) { setProfileName(null); return; }
-    // username is on profile, which the loadout hook already loads via useProfile.
-    // We mirror it from localStorage if available; otherwise fall back later.
-  }, [userId]);
+    if (profile?.username) {
+      setName(profile.username);
+      try { localStorage.setItem("arena.name", profile.username); } catch { /* ignore */ }
+    }
+  }, [profile?.username]);
 
   const isGuest = !userId;
-  const displayName = profileName ?? (name.trim() || "Guest");
+  const displayName = profile?.username ?? (name.trim() || "Guest");
 
   const go = (roomCode: string, customName?: string) => {
     const trimmed = name.trim() || `Player${Math.floor(Math.random() * 999)}`;
@@ -145,6 +145,7 @@ function Index() {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Your name"
                 maxLength={16}
+                disabled={!!userId}
                 className="border-foreground/10 bg-background text-foreground"
               />
             </div>
