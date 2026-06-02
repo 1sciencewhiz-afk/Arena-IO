@@ -16,6 +16,7 @@ export type Profile = {
   inventory: WeaponId[];
   storage_weapons: WeaponId[];
   hotbar: WeaponId[];
+  banned: boolean;
 };
 
 function usernameToEmail(username: string) {
@@ -58,7 +59,7 @@ export function useProfile(userId: string | null) {
     (async () => {
       const { data } = await supabase
         .from("profiles")
-        .select("user_id, username, kill_points, upgrades, inventory, storage_weapons, hotbar")
+        .select("user_id, username, kill_points, upgrades, inventory, storage_weapons, hotbar, banned")
         .eq("user_id", userId)
         .maybeSingle();
       if (!cancelled && data) {
@@ -74,6 +75,7 @@ export function useProfile(userId: string | null) {
           inventory,
           storage_weapons: sanitizeWeaponArr(data.storage_weapons, []),
           hotbar: hotbar.length ? hotbar : [inventory[0] ?? "pistol"],
+          banned: !!(data as { banned?: boolean }).banned,
         });
       }
     })();
