@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { RealtimeChannel } from "@supabase/supabase-js";
@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { announceRoom } from "@/lib/arena/lobby";
 import { TouchControls } from "@/components/arena/TouchControls";
 import { HowToPlayContent } from "@/components/arena/HowToPlayContent";
-import { useAuthUser, useProfile } from "@/lib/arena/auth";
+import { useAuthUser, useProfile, useIsAdmin } from "@/lib/arena/auth";
 import { useLoadout } from "@/lib/arena/loadout";
 import {
   WEAPONS,
@@ -89,8 +89,10 @@ function emptyCooldowns(): Record<WeaponId, number> {
 
 function RoomPage() {
   const { code } = Route.useParams();
+  const navigate = useNavigate();
   const { userId } = useAuthUser();
   const { profile } = useProfile(userId);
+  const isAdmin = useIsAdmin(userId);
   const { loadout, update: updateLoadout } = useLoadout(userId);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [connected, setConnected] = useState(false);
@@ -167,6 +169,15 @@ function RoomPage() {
   const chargeStartRef = useRef<number | null>(null);
   const upgradesRef = useRef<Upgrades>({ ...ZERO_UPGRADES });
   const hotbarRef = useRef<WeaponId[]>(["pistol"]);
+  const isAdminRef = useRef(false);
+
+  // Track admin status in a ref for the game loop
+  useEffect(() => { isAdminRef.current = isAdmin; }, [isAdmin]);
+
+  // Boot banned players back to the lobby
+  useEffect(() => {
+    if (profile?.banned) navigate({ to: "/" });
+  }, [profile?.banned, navigate]);
 
   // Unified input refs
   const moveVecRef = useRef<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
