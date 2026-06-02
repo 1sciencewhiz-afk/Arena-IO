@@ -3,9 +3,10 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { subscribeLobby, type LobbyRoom } from "@/lib/arena/lobby";
-import { useAuthUser, useProfile, signOut } from "@/lib/arena/auth";
+import { useAuthUser, useProfile, signOut, useIsAdmin } from "@/lib/arena/auth";
 import { useLoadout } from "@/lib/arena/loadout";
 import { Armory } from "@/components/arena/Armory";
+import { AdminPanel } from "@/components/arena/AdminPanel";
 
 export const PUBLIC_ROOM_CODE = "PUBLIC";
 
@@ -28,6 +29,7 @@ function Index() {
   const { userId, ready } = useAuthUser();
   const { profile } = useProfile(userId);
   const { loadout, update } = useLoadout(userId);
+  const isAdmin = useIsAdmin(userId);
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [roomName, setRoomName] = useState("");
@@ -81,6 +83,11 @@ function Index() {
                   : <>Playing as <span className="font-bold text-foreground">Guest</span></>
                 : "…"}
             </span>
+            {isAdmin && (
+              <span className="ml-1 rounded bg-yellow-500/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-yellow-400">
+                Admin
+              </span>
+            )}
             <span className="ml-2 rounded-md bg-primary/10 px-2 py-0.5 font-mono text-xs font-bold text-primary">
               {loadout.killPoints} pts
             </span>
@@ -233,6 +240,14 @@ function Index() {
 
         {/* Armory */}
         <Armory loadout={loadout} update={update} isGuest={isGuest} />
+
+        {isAdmin && <AdminPanel />}
+
+        {profile?.banned && (
+          <p className="text-center text-xs font-bold text-red-400">
+            Your account has been banned. You cannot join matches.
+          </p>
+        )}
 
         {isGuest && ready && (
           <p className="text-center text-[11px] text-foreground/50">
