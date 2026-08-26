@@ -87,21 +87,32 @@ export function rollRandomWeapon(rng: () => number = Math.random): WeaponId {
   return "pistol";
 }
 
-export type UpgradeId = "damage" | "cooldown" | "speed" | "health";
+export type UpgradeId = "damage" | "cooldown" | "speed" | "health" | "armour";
 export type Upgrades = Record<UpgradeId, number>;
-export const MAX_UPGRADE_LEVEL = 5;
+/** Highest level any upgrade can reach (used for clamping untrusted input). */
+export const MAX_UPGRADE_LEVEL = 20;
+
+export const UPGRADE_MAX: Record<UpgradeId, number> = {
+  damage: 20,
+  cooldown: 20,
+  armour: 20,
+  speed: 5,
+  health: 5,
+};
 
 export const UPGRADE_DEFS: { id: UpgradeId; name: string; desc: string }[] = [
   { id: "damage",   name: "Damage",     desc: "+10% per level" },
-  { id: "cooldown", name: "Fire Rate",  desc: "-10% cooldown per level" },
+  { id: "cooldown", name: "Fire Rate",  desc: "-7% cooldown per level" },
+  { id: "armour",   name: "Armour",     desc: "-3% damage taken per level" },
   { id: "speed",    name: "Move Speed", desc: "+8% per level" },
   { id: "health",   name: "Max HP",     desc: "+15 per level" },
 ];
 
 export function upgradeCost(currentLevel: number) { return currentLevel + 1; }
 export function dmgMult(u: Upgrades)      { return 1 + 0.1 * u.damage; }
-export function cooldownMult(u: Upgrades) { return Math.pow(0.9, u.cooldown); }
+export function cooldownMult(u: Upgrades) { return Math.max(0.15, Math.pow(0.93, u.cooldown)); }
 export function speedMult(u: Upgrades)    { return 1 + 0.08 * u.speed; }
 export function maxHp(u: Upgrades)        { return 100 + 15 * u.health; }
+export function damageTakenMult(u: Upgrades) { return Math.max(0.4, 1 - 0.03 * (u.armour ?? 0)); }
 
 export const ZERO_UPGRADES: Upgrades = { damage: 0, cooldown: 0, speed: 0, health: 0 };
