@@ -1,7 +1,8 @@
 export type WeaponId =
   | "pistol" | "shotgun" | "sniper" | "rocket" | "mine" | "sword"
   | "tracking_missile" | "nuke" | "grenade" | "mini_soldiers"
-  | "dual_pistols" | "chain" | "battleaxe" | "spear";
+  | "dual_pistols" | "chain" | "battleaxe" | "spear"
+  | "army" | "smg" | "flak" | "crossbow";
 
 export type Rarity = "common" | "rare" | "epic" | "legendary";
 
