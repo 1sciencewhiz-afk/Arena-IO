@@ -115,4 +115,4 @@ export function speedMult(u: Upgrades)    { return 1 + 0.08 * u.speed; }
 export function maxHp(u: Upgrades)        { return 100 + 15 * u.health; }
 export function damageTakenMult(u: Upgrades) { return Math.max(0.4, 1 - 0.03 * (u.armour ?? 0)); }
 
-export const ZERO_UPGRADES: Upgrades = { damage: 0, cooldown: 0, speed: 0, health: 0 };
+export const ZERO_UPGRADES: Upgrades = { damage: 0, cooldown: 0, speed: 0, health: 0, armour: 0 };
