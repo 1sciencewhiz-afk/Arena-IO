@@ -991,6 +991,13 @@ function RoomPage() {
             ctx.beginPath(); ctx.arc(i, 0, 2.5, 0, Math.PI * 2); ctx.fill();
           }
           ctx.restore();
+        } else if (b.weapon === "army" || b.weapon === "mini_soldiers") {
+          const ang = Math.atan2(b.vy, b.vx);
+          ctx.save();
+          ctx.translate(b.x, b.y); ctx.rotate(ang);
+          ctx.fillRect(-b.radius, -b.radius, b.radius * 2, b.radius * 2);
+          ctx.fillRect(b.radius, -1.5, b.radius + 3, 3); // pistol barrel
+          ctx.restore();
         } else {
           ctx.beginPath(); ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2); ctx.fill();
         }
