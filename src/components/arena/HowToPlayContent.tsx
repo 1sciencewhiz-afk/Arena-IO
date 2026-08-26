@@ -1,4 +1,4 @@
-import { WEAPONS, WEAPON_ORDER, UPGRADE_DEFS, MAX_UPGRADE_LEVEL } from "@/lib/arena/weapons";
+import { WEAPONS, WEAPON_ORDER, UPGRADE_DEFS, UPGRADE_MAX } from "@/lib/arena/weapons";
 
 export function HowToPlayContent() {
   return (
@@ -69,13 +69,13 @@ export function HowToPlayContent() {
       <section>
         <h2 className="mb-2 text-base font-bold text-foreground">Upgrades</h2>
         <p className="mb-2 text-xs text-foreground/60">
-          1 kill = 1 point. Each level costs <i>level + 1</i> points. Max level {MAX_UPGRADE_LEVEL}. Resets when you leave the room.
+          1 kill = 1 point. Each level costs <i>level + 1</i> points. Damage, Fire Rate and Armour go up to level 20; Move Speed and Max HP cap at 5. Resets when you leave the room.
         </p>
         <ul className="grid gap-2 sm:grid-cols-2">
           {UPGRADE_DEFS.map((u) => (
             <li key={u.id} className="rounded-lg border border-foreground/10 bg-foreground/5 p-3">
               <div className="font-semibold text-foreground">{u.name}</div>
-              <div className="text-xs text-foreground/60">{u.desc}</div>
+              <div className="text-xs text-foreground/60">{u.desc} · max Lv {UPGRADE_MAX[u.id]}</div>
             </li>
           ))}
         </ul>

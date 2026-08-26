@@ -11,7 +11,6 @@ import { useLoadout } from "@/lib/arena/loadout";
 import {
   WEAPONS,
   WEAPON_ORDER,
-  MAX_UPGRADE_LEVEL,
   UPGRADE_MAX,
   damageTakenMult,
   ZERO_UPGRADES,
