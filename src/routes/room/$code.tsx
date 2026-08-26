@@ -12,6 +12,8 @@ import {
   WEAPONS,
   WEAPON_ORDER,
   MAX_UPGRADE_LEVEL,
+  UPGRADE_MAX,
+  damageTakenMult,
   ZERO_UPGRADES,
   dmgMult,
   cooldownMult,
@@ -296,7 +298,7 @@ function RoomPage() {
     function applyDamage(targetId: string, byId: string, dmg: number, weapon: WeaponId, immobilizeMs?: number) {
       const t = playersRef.current.get(targetId);
       if (!t || t.hp <= 0) return;
-      t.hp = Math.max(0, t.hp - dmg);
+      t.hp = Math.max(0, t.hp - dmg * damageTakenMult(t.upgrades));
       if (immobilizeMs && targetId === me.id) {
         t.immobilizedUntil = Math.max(t.immobilizedUntil, performance.now() + immobilizeMs);
       } else if (immobilizeMs) {
@@ -371,10 +373,11 @@ function RoomPage() {
         const safeKills = clampNum(p.kills, 0, 100000, 0);
         const rawU = (p.upgrades ?? ZERO_UPGRADES) as Upgrades;
         const safeUpgrades: Upgrades = {
-          damage: clampNum(rawU.damage, 0, MAX_UPGRADE_LEVEL),
-          cooldown: clampNum(rawU.cooldown, 0, MAX_UPGRADE_LEVEL),
-          speed: clampNum(rawU.speed, 0, MAX_UPGRADE_LEVEL),
-          health: clampNum(rawU.health, 0, MAX_UPGRADE_LEVEL),
+          damage: clampNum(rawU.damage, 0, UPGRADE_MAX.damage),
+          cooldown: clampNum(rawU.cooldown, 0, UPGRADE_MAX.cooldown),
+          speed: clampNum(rawU.speed, 0, UPGRADE_MAX.speed),
+          health: clampNum(rawU.health, 0, UPGRADE_MAX.health),
+          armour: clampNum(rawU.armour, 0, UPGRADE_MAX.armour),
         };
         const safeName = typeof p.name === "string" ? p.name.slice(0, 32) : "Player";
         const safeColor = typeof p.color === "string" ? p.color.slice(0, 32) : colorFor(p.id);
