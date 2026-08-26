@@ -2,8 +2,9 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   WEAPONS,
+  ALL_WEAPONS,
   UPGRADE_DEFS,
-  MAX_UPGRADE_LEVEL,
+  UPGRADE_MAX,
   MAX_INVENTORY,
   MAX_HOTBAR,
   WEAPON_ROLL_COST,
@@ -28,8 +29,8 @@ export function Armory({ loadout, update, isGuest }: Props) {
   const [flash, setFlash] = useState<null | { weapon: WeaponId; isNew: boolean }>(null);
 
   const buyUpgrade = (id: UpgradeId) => {
-    const lvl = loadout.upgrades[id];
-    if (lvl >= MAX_UPGRADE_LEVEL) return;
+    const lvl = loadout.upgrades[id] ?? 0;
+    if (lvl >= UPGRADE_MAX[id]) return;
     const cost = upgradeCost(lvl);
     if (loadout.killPoints < cost) return;
     const upgrades: Upgrades = { ...loadout.upgrades, [id]: lvl + 1 };
@@ -39,7 +40,7 @@ export function Armory({ loadout, update, isGuest }: Props) {
   const roll = () => {
     if (loadout.killPoints < WEAPON_ROLL_COST) return;
     const owned = new Set<WeaponId>([...loadout.inventory, ...loadout.storage]);
-    if (owned.size >= 14) {
+    if (owned.size >= ALL_WEAPONS.length) {
       // already own all (legitimate cap is 14 weapons total)
     }
     let pick: WeaponId = rollRandomWeapon();
@@ -126,8 +127,9 @@ export function Armory({ loadout, update, isGuest }: Props) {
           <h3 className="mb-2 text-xs uppercase tracking-wider text-foreground/60">Upgrades</h3>
           <ul className="space-y-2">
             {UPGRADE_DEFS.map((u) => {
-              const lvl = loadout.upgrades[u.id];
-              const maxed = lvl >= MAX_UPGRADE_LEVEL;
+              const lvl = loadout.upgrades[u.id] ?? 0;
+              const cap = UPGRADE_MAX[u.id];
+              const maxed = lvl >= cap;
               const cost = maxed ? 0 : upgradeCost(lvl);
               const can = !maxed && loadout.killPoints >= cost;
               return (
@@ -135,7 +137,7 @@ export function Armory({ loadout, update, isGuest }: Props) {
                   <div className="min-w-0">
                     <div className="text-sm font-semibold">{u.name}</div>
                     <div className="text-[10px] text-foreground/50">
-                      Lv {lvl}/{MAX_UPGRADE_LEVEL} · {u.desc}
+                      Lv {lvl}/{cap} · {u.desc}
                     </div>
                   </div>
                   <Button size="sm" variant={can ? "default" : "secondary"} disabled={!can} onClick={() => buyUpgrade(u.id)}>
