@@ -51,18 +51,23 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
   chain:            { id: "chain",            name: "Chain",            cooldown: 1.4,  dmg: 8,  speed: 520, lifetime: 700, radius: 5, immobilize: 1500, rarity: "rare" },
   battleaxe:        { id: "battleaxe",        name: "Battleaxe",        cooldown: 0.55, dmg: 38, speed: 0,   lifetime: 220, radius: 0, melee: { range: 74, arc: Math.PI * 0.75 }, rarity: "epic" },
   spear:            { id: "spear",            name: "Spear",            cooldown: 0.85, dmg: 30, speed: 720, lifetime: 1200, radius: 4, pierce: true, rarity: "rare" },
+  army:             { id: "army",             name: "Army",             cooldown: 7.0,  dmg: 1,  speed: 240, lifetime: 9000, radius: 5, homing: { turn: 2.6, range: 900 }, summon: 5, rarity: "legendary" },
+  smg:              { id: "smg",              name: "SMG",              cooldown: 0.11, dmg: 6,  speed: 620, lifetime: 1100, radius: 3, spread: 0.09, rarity: "common" },
+  flak:             { id: "flak",             name: "Flak Cannon",      cooldown: 1.2,  dmg: 9,  speed: 430, lifetime: 900,  radius: 5, pellets: 7, spread: 0.7, splash: 34, rarity: "epic" },
+  crossbow:         { id: "crossbow",         name: "Crossbow",         cooldown: 1.0,  dmg: 34, speed: 820, lifetime: 1500, radius: 4, pierce: true, charge: 0.35, rarity: "rare" },
 };
 
 export const WEAPON_ORDER: WeaponId[] = [
   "pistol", "shotgun", "sniper", "rocket", "mine", "sword",
   "tracking_missile", "nuke", "grenade", "mini_soldiers",
   "dual_pistols", "chain", "battleaxe", "spear",
+  "army", "smg", "flak", "crossbow",
 ];
 
 export const ALL_WEAPONS = WEAPON_ORDER;
 export const WEAPON_ROLL_COST = 4;
 export const STARTING_WEAPONS: WeaponId[] = ["pistol"];
-export const MAX_INVENTORY = 14;
+export const MAX_INVENTORY = 18;
 export const MAX_HOTBAR = 4;
 
 export function isWeaponId(v: unknown): v is WeaponId {
