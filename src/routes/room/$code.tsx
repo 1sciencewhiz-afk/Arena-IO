@@ -35,6 +35,18 @@ const ARENA_H = 700;
 const PLAYER_R = 18;
 const BASE_SPEED = 260;
 
+/** Cooperative AI squad — one ranged, one summoner, one melee. */
+type BotDef = {
+  id: string; name: string; color: string; weapon: WeaponId;
+  hp: number; speed: number; keep: number; range: number;
+};
+const BOT_DEFS: BotDef[] = [
+  { id: "bot:ranged",   name: "Sentry",  color: "#f97316", weapon: "smg",           hp: 130, speed: 190, keep: 260, range: 380 },
+  { id: "bot:summoner", name: "Warlock", color: "#a855f7", weapon: "mini_soldiers", hp: 110, speed: 155, keep: 430, range: 560 },
+  { id: "bot:melee",    name: "Brute",   color: "#ef4444", weapon: "battleaxe",     hp: 190, speed: 235, keep: 0,   range: 62  },
+];
+const isBot = (id: string) => id.startsWith("bot:");
+
 type Player = {
   id: string;
   name: string;
@@ -71,6 +83,7 @@ type Projectile = {
   hitSet?: Set<string>;  // pierce: who already got hit
   homing?: { turn: number; range: number };
   immobilize?: number;   // ms freeze on hit
+  nextShotAt?: number;   // summoned units: next pistol shot time
 };
 
 type SwingFx = { x: number; y: number; ang: number; range: number; arc: number; born: number; color: string };
@@ -171,6 +184,8 @@ function RoomPage() {
   const upgradesRef = useRef<Upgrades>({ ...ZERO_UPGRADES });
   const hotbarRef = useRef<WeaponId[]>(["pistol"]);
   const isAdminRef = useRef(false);
+  const hostRef = useRef(false);
+  const botStateRef = useRef<Map<string, { lastFire: number; respawnAt: number; aim: number }>>(new Map());
 
   // Track admin status in a ref for the game loop
   useEffect(() => { isAdminRef.current = isAdmin; }, [isAdmin]);
@@ -339,8 +354,13 @@ function RoomPage() {
         const state = channel.presenceState<{ name: string; color: string }>();
         const presentIds = new Set(Object.keys(state));
         for (const id of Array.from(playersRef.current.keys())) {
-          if (!presentIds.has(id)) playersRef.current.delete(id);
+          if (!presentIds.has(id) && !isBot(id)) playersRef.current.delete(id);
         }
+        // Lowest id present hosts the bot squad
+        const sorted = Array.from(presentIds).sort();
+        hostRef.current = sorted.length > 0 && sorted[0] === me.id;
+        if (hostRef.current) ensureBots();
+        else for (const b of BOT_DEFS) botStateRef.current.delete(b.id);
         for (const id of presentIds) {
           if (!playersRef.current.has(id)) {
             const meta = state[id]?.[0];
