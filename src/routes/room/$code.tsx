@@ -981,15 +981,17 @@ function RoomPage() {
         tryFire(now);
       }
 
+      if (hostRef.current) botTick(now, dt);
+
       // Update projectiles + collision
       const alive: Projectile[] = [];
       for (const b of projectilesRef.current) {
         // Lifetime / fuse
         if (now - b.born > b.lifetime) {
-          if (b.splash && b.owner === me.id) explode(b);
+          if (b.splash && isMine(b.owner)) explode(b);
           continue;
         }
-        if (b.fuseAt && now >= b.fuseAt && b.owner === me.id) {
+        if (b.fuseAt && now >= b.fuseAt && isMine(b.owner)) {
           explode(b);
           channelRef.current?.send({
             type: "broadcast", event: "despawn", payload: { ids: [b.id] },
@@ -998,14 +1000,8 @@ function RoomPage() {
         }
 
         // Homing — adjust velocity toward nearest non-owner
-        if (b.homing && b.owner === me.id) {
-          let best: Player | null = null;
-          let bestD = b.homing.range;
-          for (const other of playersRef.current.values()) {
-            if (other.id === me.id || other.hp <= 0) continue;
-            const d = Math.hypot(other.x - b.x, other.y - b.y);
-            if (d < bestD) { best = other; bestD = d; }
-          }
+        if (b.homing && isMine(b.owner)) {
+          const best = nearestEnemy(b.owner, b.x, b.y, b.homing.range);
           if (best) {
             const desired = Math.atan2(best.y - b.y, best.x - b.x);
             const cur = Math.atan2(b.vy, b.vx);
@@ -1028,23 +1024,24 @@ function RoomPage() {
         const offX = b.x < 0 || b.x > ARENA_W;
         const offY = b.y < 0 || b.y > ARENA_H;
         if (offX || offY) {
-          if (b.bouncesLeft && b.bouncesLeft > 0 && b.owner === me.id) {
+          if (b.bouncesLeft && b.bouncesLeft > 0 && isMine(b.owner)) {
             if (offX) { b.vx = -b.vx; b.x = Math.max(0, Math.min(ARENA_W, b.x)); }
             if (offY) { b.vy = -b.vy; b.y = Math.max(0, Math.min(ARENA_H, b.y)); }
             b.bouncesLeft -= 1;
           } else {
-            if (b.splash && b.owner === me.id) explode(b);
+            if (b.splash && isMine(b.owner)) explode(b);
             continue;
           }
         }
 
-        if (b.owner === me.id) {
+        if (isMine(b.owner)) {
+          unitFire(b, now);
           // Mine arms then triggers
           if (b.weapon === "mine") {
             if (b.armed && now >= b.armed) {
               let trig = false;
               for (const other of playersRef.current.values()) {
-                if (other.id === me.id || other.hp <= 0) continue;
+                if (!isEnemyOf(b.owner, other)) continue;
                 if (Math.hypot(other.x - b.x, other.y - b.y) < (b.trigger ?? 36)) { trig = true; break; }
               }
               if (trig) {
@@ -1058,7 +1055,7 @@ function RoomPage() {
             if (b.pierce) {
               const hits: Player[] = [];
               for (const other of playersRef.current.values()) {
-                if (other.id === me.id || other.hp <= 0) continue;
+                if (!isEnemyOf(b.owner, other)) continue;
                 if (b.hitSet?.has(other.id)) continue;
                 if (Math.hypot(other.x - b.x, other.y - b.y) < PLAYER_R + b.radius) {
                   hits.push(other);
@@ -1066,27 +1063,27 @@ function RoomPage() {
               }
               for (const other of hits) {
                 b.hitSet?.add(other.id);
-                applyDamage(other.id, me.id, b.dmg, b.weapon, b.immobilize);
+                applyDamage(other.id, b.owner, b.dmg, b.weapon, b.immobilize);
                 channelRef.current?.send({
                   type: "broadcast", event: "hit",
-                  payload: { target: other.id, by: me.id, dmg: b.dmg, weapon: b.weapon, immobilize: b.immobilize },
+                  payload: { target: other.id, by: b.owner, dmg: b.dmg, weapon: b.weapon, immobilize: b.immobilize },
                 });
               }
               // spear keeps flying; let lifetime handle it
             } else {
               let hit: Player | null = null;
               for (const other of playersRef.current.values()) {
-                if (other.id === me.id || other.hp <= 0) continue;
+                if (!isEnemyOf(b.owner, other)) continue;
                 if (Math.hypot(other.x - b.x, other.y - b.y) < PLAYER_R + b.radius) { hit = other; break; }
               }
               if (hit) {
                 if (b.splash) {
                   explode(b);
                 } else {
-                  applyDamage(hit.id, me.id, b.dmg, b.weapon, b.immobilize);
+                  applyDamage(hit.id, b.owner, b.dmg, b.weapon, b.immobilize);
                   channelRef.current?.send({
                     type: "broadcast", event: "hit",
-                    payload: { target: hit.id, by: me.id, dmg: b.dmg, weapon: b.weapon, immobilize: b.immobilize },
+                    payload: { target: hit.id, by: b.owner, dmg: b.dmg, weapon: b.weapon, immobilize: b.immobilize },
                   });
                 }
                 channelRef.current?.send({ type: "broadcast", event: "despawn", payload: { ids: [b.id] } });
@@ -1121,20 +1118,18 @@ function RoomPage() {
     }
 
     function explode(b: Projectile) {
-      const self = playersRef.current.get(me.id);
-      if (!self) return;
       const isSplash = !!b.splash;
       const radius = b.splash ?? PLAYER_R + b.radius;
       for (const other of playersRef.current.values()) {
-        if (other.id === me.id || other.hp <= 0) continue;
+        if (!isEnemyOf(b.owner, other)) continue;
         const d = Math.hypot(other.x - b.x, other.y - b.y);
         if (d < radius + PLAYER_R) {
           const falloff = isSplash ? Math.max(0.4, 1 - d / (radius + PLAYER_R)) : 1;
           const dmg = b.dmg * falloff;
-          applyDamage(other.id, me.id, dmg, b.weapon, b.immobilize);
+          applyDamage(other.id, b.owner, dmg, b.weapon, b.immobilize);
           channelRef.current?.send({
             type: "broadcast", event: "hit",
-            payload: { target: other.id, by: me.id, dmg, weapon: b.weapon, immobilize: b.immobilize },
+            payload: { target: other.id, by: b.owner, dmg, weapon: b.weapon, immobilize: b.immobilize },
           });
         }
       }
