@@ -35,6 +35,18 @@ const ARENA_H = 700;
 const PLAYER_R = 18;
 const BASE_SPEED = 260;
 
+/** Cooperative AI squad — one ranged, one summoner, one melee. */
+type BotDef = {
+  id: string; name: string; color: string; weapon: WeaponId;
+  hp: number; speed: number; keep: number; range: number;
+};
+const BOT_DEFS: BotDef[] = [
+  { id: "bot:ranged",   name: "Sentry",  color: "#f97316", weapon: "smg",           hp: 130, speed: 190, keep: 260, range: 380 },
+  { id: "bot:summoner", name: "Warlock", color: "#a855f7", weapon: "mini_soldiers", hp: 110, speed: 155, keep: 430, range: 560 },
+  { id: "bot:melee",    name: "Brute",   color: "#ef4444", weapon: "battleaxe",     hp: 190, speed: 235, keep: 0,   range: 62  },
+];
+const isBot = (id: string) => id.startsWith("bot:");
+
 type Player = {
   id: string;
   name: string;
@@ -71,6 +83,7 @@ type Projectile = {
   hitSet?: Set<string>;  // pierce: who already got hit
   homing?: { turn: number; range: number };
   immobilize?: number;   // ms freeze on hit
+  nextShotAt?: number;   // summoned units: next pistol shot time
 };
 
 type SwingFx = { x: number; y: number; ang: number; range: number; arc: number; born: number; color: string };
@@ -171,6 +184,8 @@ function RoomPage() {
   const upgradesRef = useRef<Upgrades>({ ...ZERO_UPGRADES });
   const hotbarRef = useRef<WeaponId[]>(["pistol"]);
   const isAdminRef = useRef(false);
+  const hostRef = useRef(false);
+  const botStateRef = useRef<Map<string, { lastFire: number; respawnAt: number; aim: number }>>(new Map());
 
   // Track admin status in a ref for the game loop
   useEffect(() => { isAdminRef.current = isAdmin; }, [isAdmin]);
@@ -339,8 +354,13 @@ function RoomPage() {
         const state = channel.presenceState<{ name: string; color: string }>();
         const presentIds = new Set(Object.keys(state));
         for (const id of Array.from(playersRef.current.keys())) {
-          if (!presentIds.has(id)) playersRef.current.delete(id);
+          if (!presentIds.has(id) && !isBot(id)) playersRef.current.delete(id);
         }
+        // Lowest id present hosts the bot squad
+        const sorted = Array.from(presentIds).sort();
+        hostRef.current = sorted.length > 0 && sorted[0] === me.id;
+        if (hostRef.current) ensureBots();
+        else for (const b of BOT_DEFS) botStateRef.current.delete(b.id);
         for (const id of presentIds) {
           if (!playersRef.current.has(id)) {
             const meta = state[id]?.[0];
@@ -596,6 +616,193 @@ function RoomPage() {
       }
     }
 
+    const isMine = (ownerId: string) =>
+      ownerId === me.id || (hostRef.current && isBot(ownerId));
+    const isEnemyOf = (ownerId: string, other: Player) =>
+      other.hp > 0 && other.id !== ownerId && !(isBot(ownerId) && isBot(other.id));
+
+    function ensureBots() {
+      for (const def of BOT_DEFS) {
+        if (!playersRef.current.has(def.id)) {
+          playersRef.current.set(def.id, {
+            id: def.id, name: def.name,
+            x: Math.random() * (ARENA_W - 300) + 150,
+            y: Math.random() * (ARENA_H - 300) + 150,
+            color: def.color, hp: def.hp, maxHp: def.hp, kills: 0,
+            upgrades: { ...ZERO_UPGRADES }, aim: 0, immobilizedUntil: 0,
+          });
+        }
+        if (!botStateRef.current.has(def.id)) {
+          botStateRef.current.set(def.id, { lastFire: 0, respawnAt: 0, aim: 0 });
+        }
+      }
+    }
+
+    /** Spawn a bullet owned by a bot (or a summoned unit) and tell everyone. */
+    function spawnOwnedBullet(
+      ownerId: string, ownerColor: string, weapon: WeaponId,
+      x: number, y: number, ang: number, dmg: number, now: number, tag: string,
+    ) {
+      const w = WEAPONS[weapon];
+      const p: Projectile = {
+        id: `${ownerId}-${tag}-${Math.round(now)}-${Math.random().toString(36).slice(2, 6)}`,
+        owner: ownerId, ownerColor, weapon,
+        x: x + Math.cos(ang) * (PLAYER_R + 4),
+        y: y + Math.sin(ang) * (PLAYER_R + 4),
+        vx: Math.cos(ang) * w.speed,
+        vy: Math.sin(ang) * w.speed,
+        dmg, radius: w.radius, splash: w.splash,
+        born: now, lifetime: w.lifetime,
+        homing: w.homing,
+      };
+      spawnProjectile(p);
+      channelRef.current?.send({ type: "broadcast", event: "fire", payload: { projectiles: [stripSet(p)] } });
+    }
+
+    /** Nearest valid enemy for an owner id. */
+    function nearestEnemy(ownerId: string, x: number, y: number, maxDist: number): Player | null {
+      let best: Player | null = null;
+      let bestD = maxDist;
+      for (const other of playersRef.current.values()) {
+        if (!isEnemyOf(ownerId, other)) continue;
+        const d = Math.hypot(other.x - x, other.y - y);
+        if (d < bestD) { best = other; bestD = d; }
+      }
+      return best;
+    }
+
+    /** Summoned units (Army / Mini Soldiers) shoot their pistols. */
+    function unitFire(b: Projectile, now: number) {
+      const w = WEAPONS[b.weapon];
+      if (!w.summon) return;
+      if (b.nextShotAt == null) b.nextShotAt = b.born + 400;
+      if (now < b.nextShotAt) return;
+      const target = nearestEnemy(b.owner, b.x, b.y, 420);
+      if (!target) { b.nextShotAt = now + 200; return; }
+      b.nextShotAt = now + 650;
+      const ang = Math.atan2(target.y - b.y, target.x - b.x);
+      const pw = WEAPONS.pistol;
+      const p: Projectile = {
+        id: `${b.id}-s${Math.round(now)}`,
+        owner: b.owner, ownerColor: b.ownerColor, weapon: "pistol",
+        x: b.x + Math.cos(ang) * (b.radius + 5),
+        y: b.y + Math.sin(ang) * (b.radius + 5),
+        vx: Math.cos(ang) * pw.speed,
+        vy: Math.sin(ang) * pw.speed,
+        dmg: Math.min(b.dmg, pw.dmg * 2),
+        radius: 3,
+        born: now, lifetime: 900,
+      };
+      spawnProjectile(p);
+      channelRef.current?.send({ type: "broadcast", event: "fire", payload: { projectiles: [stripSet(p)] } });
+    }
+
+    let lastBotBroadcast = 0;
+    function botTick(now: number, dt: number) {
+      ensureBots();
+      // Shared focus: the human closest to the squad
+      let focus: Player | null = null;
+      let focusD = Infinity;
+      for (const other of playersRef.current.values()) {
+        if (isBot(other.id) || other.hp <= 0) continue;
+        for (const def of BOT_DEFS) {
+          const bp = playersRef.current.get(def.id);
+          if (!bp) continue;
+          const d = Math.hypot(other.x - bp.x, other.y - bp.y);
+          if (d < focusD) { focusD = d; focus = other; }
+        }
+      }
+
+      for (const def of BOT_DEFS) {
+        const bot = playersRef.current.get(def.id);
+        const st = botStateRef.current.get(def.id);
+        if (!bot || !st) continue;
+
+        if (bot.hp <= 0) {
+          if (st.respawnAt === 0) st.respawnAt = now + 6000;
+          else if (now >= st.respawnAt) {
+            st.respawnAt = 0;
+            bot.hp = bot.maxHp;
+            bot.x = Math.random() * (ARENA_W - 300) + 150;
+            bot.y = Math.random() * (ARENA_H - 300) + 150;
+          }
+          continue;
+        }
+        if (!focus) continue;
+
+        const dx = focus.x - bot.x;
+        const dy = focus.y - bot.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        bot.aim = Math.atan2(dy, dx);
+
+        // Keep preferred spacing; melee always closes in
+        let moveDir = 0;
+        if (dist > def.keep + 40) moveDir = 1;
+        else if (dist < def.keep - 40) moveDir = -1;
+        if (moveDir !== 0) {
+          const strafe = Math.sin(now / 700 + def.id.length) * 0.5;
+          const ang = Math.atan2(dy, dx) + strafe * 0.6;
+          bot.x += Math.cos(ang) * moveDir * def.speed * dt;
+          bot.y += Math.sin(ang) * moveDir * def.speed * dt;
+          bot.x = Math.max(PLAYER_R, Math.min(ARENA_W - PLAYER_R, bot.x));
+          bot.y = Math.max(PLAYER_R, Math.min(ARENA_H - PLAYER_R, bot.y));
+        }
+
+        const w = WEAPONS[def.weapon];
+        if (now - st.lastFire < w.cooldown * 1000) continue;
+        if (dist > def.range) continue;
+        st.lastFire = now;
+
+        if (w.melee) {
+          const swing: SwingFx = {
+            x: bot.x, y: bot.y, ang: bot.aim, range: w.melee.range, arc: w.melee.arc,
+            born: now, color: bot.color,
+          };
+          swingsRef.current.push(swing);
+          channelRef.current?.send({ type: "broadcast", event: "swing", payload: swing });
+          for (const other of playersRef.current.values()) {
+            if (!isEnemyOf(bot.id, other)) continue;
+            const ox = other.x - bot.x; const oy = other.y - bot.y;
+            if (Math.hypot(ox, oy) > w.melee.range + PLAYER_R) continue;
+            let diff = Math.atan2(oy, ox) - bot.aim;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            if (Math.abs(diff) <= w.melee.arc / 2) {
+              applyDamage(other.id, bot.id, w.dmg, def.weapon);
+              channelRef.current?.send({
+                type: "broadcast", event: "hit",
+                payload: { target: other.id, by: bot.id, dmg: w.dmg, weapon: def.weapon },
+              });
+            }
+          }
+        } else if (w.summon) {
+          for (let i = 0; i < w.summon; i++) {
+            const fan = (i - (w.summon - 1) / 2) * 0.35;
+            spawnOwnedBullet(bot.id, bot.color, def.weapon, bot.x, bot.y, bot.aim + fan, w.dmg, now, `sum${i}`);
+          }
+        } else {
+          const jitter = (Math.random() - 0.5) * (w.spread ?? 0.12);
+          spawnOwnedBullet(bot.id, bot.color, def.weapon, bot.x, bot.y, bot.aim + jitter, w.dmg, now, "b");
+        }
+      }
+
+      if (now - lastBotBroadcast > 60) {
+        lastBotBroadcast = now;
+        for (const def of BOT_DEFS) {
+          const bot = playersRef.current.get(def.id);
+          if (!bot) continue;
+          channelRef.current?.send({
+            type: "broadcast", event: "state",
+            payload: {
+              id: bot.id, name: bot.name, x: bot.x, y: bot.y,
+              hp: bot.hp, maxHp: bot.maxHp, kills: bot.kills, color: bot.color,
+              upgrades: bot.upgrades, aim: bot.aim,
+            },
+          });
+        }
+      }
+    }
+
     function tryFire(now: number) {
       const self = playersRef.current.get(me.id);
       if (!self || self.hp <= 0) return;
@@ -774,15 +981,17 @@ function RoomPage() {
         tryFire(now);
       }
 
+      if (hostRef.current) botTick(now, dt);
+
       // Update projectiles + collision
       const alive: Projectile[] = [];
       for (const b of projectilesRef.current) {
         // Lifetime / fuse
         if (now - b.born > b.lifetime) {
-          if (b.splash && b.owner === me.id) explode(b);
+          if (b.splash && isMine(b.owner)) explode(b);
           continue;
         }
-        if (b.fuseAt && now >= b.fuseAt && b.owner === me.id) {
+        if (b.fuseAt && now >= b.fuseAt && isMine(b.owner)) {
           explode(b);
           channelRef.current?.send({
             type: "broadcast", event: "despawn", payload: { ids: [b.id] },
@@ -791,14 +1000,8 @@ function RoomPage() {
         }
 
         // Homing — adjust velocity toward nearest non-owner
-        if (b.homing && b.owner === me.id) {
-          let best: Player | null = null;
-          let bestD = b.homing.range;
-          for (const other of playersRef.current.values()) {
-            if (other.id === me.id || other.hp <= 0) continue;
-            const d = Math.hypot(other.x - b.x, other.y - b.y);
-            if (d < bestD) { best = other; bestD = d; }
-          }
+        if (b.homing && isMine(b.owner)) {
+          const best = nearestEnemy(b.owner, b.x, b.y, b.homing.range);
           if (best) {
             const desired = Math.atan2(best.y - b.y, best.x - b.x);
             const cur = Math.atan2(b.vy, b.vx);
@@ -821,23 +1024,24 @@ function RoomPage() {
         const offX = b.x < 0 || b.x > ARENA_W;
         const offY = b.y < 0 || b.y > ARENA_H;
         if (offX || offY) {
-          if (b.bouncesLeft && b.bouncesLeft > 0 && b.owner === me.id) {
+          if (b.bouncesLeft && b.bouncesLeft > 0 && isMine(b.owner)) {
             if (offX) { b.vx = -b.vx; b.x = Math.max(0, Math.min(ARENA_W, b.x)); }
             if (offY) { b.vy = -b.vy; b.y = Math.max(0, Math.min(ARENA_H, b.y)); }
             b.bouncesLeft -= 1;
           } else {
-            if (b.splash && b.owner === me.id) explode(b);
+            if (b.splash && isMine(b.owner)) explode(b);
             continue;
           }
         }
 
-        if (b.owner === me.id) {
+        if (isMine(b.owner)) {
+          unitFire(b, now);
           // Mine arms then triggers
           if (b.weapon === "mine") {
             if (b.armed && now >= b.armed) {
               let trig = false;
               for (const other of playersRef.current.values()) {
-                if (other.id === me.id || other.hp <= 0) continue;
+                if (!isEnemyOf(b.owner, other)) continue;
                 if (Math.hypot(other.x - b.x, other.y - b.y) < (b.trigger ?? 36)) { trig = true; break; }
               }
               if (trig) {
@@ -851,7 +1055,7 @@ function RoomPage() {
             if (b.pierce) {
               const hits: Player[] = [];
               for (const other of playersRef.current.values()) {
-                if (other.id === me.id || other.hp <= 0) continue;
+                if (!isEnemyOf(b.owner, other)) continue;
                 if (b.hitSet?.has(other.id)) continue;
                 if (Math.hypot(other.x - b.x, other.y - b.y) < PLAYER_R + b.radius) {
                   hits.push(other);
@@ -859,27 +1063,27 @@ function RoomPage() {
               }
               for (const other of hits) {
                 b.hitSet?.add(other.id);
-                applyDamage(other.id, me.id, b.dmg, b.weapon, b.immobilize);
+                applyDamage(other.id, b.owner, b.dmg, b.weapon, b.immobilize);
                 channelRef.current?.send({
                   type: "broadcast", event: "hit",
-                  payload: { target: other.id, by: me.id, dmg: b.dmg, weapon: b.weapon, immobilize: b.immobilize },
+                  payload: { target: other.id, by: b.owner, dmg: b.dmg, weapon: b.weapon, immobilize: b.immobilize },
                 });
               }
               // spear keeps flying; let lifetime handle it
             } else {
               let hit: Player | null = null;
               for (const other of playersRef.current.values()) {
-                if (other.id === me.id || other.hp <= 0) continue;
+                if (!isEnemyOf(b.owner, other)) continue;
                 if (Math.hypot(other.x - b.x, other.y - b.y) < PLAYER_R + b.radius) { hit = other; break; }
               }
               if (hit) {
                 if (b.splash) {
                   explode(b);
                 } else {
-                  applyDamage(hit.id, me.id, b.dmg, b.weapon, b.immobilize);
+                  applyDamage(hit.id, b.owner, b.dmg, b.weapon, b.immobilize);
                   channelRef.current?.send({
                     type: "broadcast", event: "hit",
-                    payload: { target: hit.id, by: me.id, dmg: b.dmg, weapon: b.weapon, immobilize: b.immobilize },
+                    payload: { target: hit.id, by: b.owner, dmg: b.dmg, weapon: b.weapon, immobilize: b.immobilize },
                   });
                 }
                 channelRef.current?.send({ type: "broadcast", event: "despawn", payload: { ids: [b.id] } });
@@ -914,20 +1118,18 @@ function RoomPage() {
     }
 
     function explode(b: Projectile) {
-      const self = playersRef.current.get(me.id);
-      if (!self) return;
       const isSplash = !!b.splash;
       const radius = b.splash ?? PLAYER_R + b.radius;
       for (const other of playersRef.current.values()) {
-        if (other.id === me.id || other.hp <= 0) continue;
+        if (!isEnemyOf(b.owner, other)) continue;
         const d = Math.hypot(other.x - b.x, other.y - b.y);
         if (d < radius + PLAYER_R) {
           const falloff = isSplash ? Math.max(0.4, 1 - d / (radius + PLAYER_R)) : 1;
           const dmg = b.dmg * falloff;
-          applyDamage(other.id, me.id, dmg, b.weapon, b.immobilize);
+          applyDamage(other.id, b.owner, dmg, b.weapon, b.immobilize);
           channelRef.current?.send({
             type: "broadcast", event: "hit",
-            payload: { target: other.id, by: me.id, dmg, weapon: b.weapon, immobilize: b.immobilize },
+            payload: { target: other.id, by: b.owner, dmg, weapon: b.weapon, immobilize: b.immobilize },
           });
         }
       }
