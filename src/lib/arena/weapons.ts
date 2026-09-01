@@ -2,7 +2,14 @@ export type WeaponId =
   | "pistol" | "shotgun" | "sniper" | "rocket" | "mine" | "sword"
   | "tracking_missile" | "nuke" | "grenade" | "mini_soldiers"
   | "dual_pistols" | "chain" | "battleaxe" | "spear"
-  | "army" | "smg" | "flak" | "crossbow";
+  | "army" | "smg" | "flak" | "crossbow"
+  | "laser" | "railgun" | "plasma" | "flamethrower" | "minigun"
+  | "boomerang" | "shuriken" | "katana" | "warhammer" | "scythe"
+  | "revolver" | "autoshotgun" | "grenade_launcher" | "cluster_bomb"
+  | "freeze_ray" | "poison_dart" | "lightning" | "blackhole"
+  | "turret" | "drone_swarm" | "javelin" | "bazooka"
+  | "icicle" | "acid_spitter" | "gauss_rifle";
+
 
 export type Rarity = "common" | "rare" | "epic" | "legendary";
 
@@ -55,6 +62,31 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
   smg:              { id: "smg",              name: "SMG",              cooldown: 0.11, dmg: 6,  speed: 620, lifetime: 1100, radius: 3, spread: 0.09, rarity: "common" },
   flak:             { id: "flak",             name: "Flak Cannon",      cooldown: 1.2,  dmg: 9,  speed: 430, lifetime: 900,  radius: 5, pellets: 7, spread: 0.7, splash: 34, rarity: "epic" },
   crossbow:         { id: "crossbow",         name: "Crossbow",         cooldown: 1.0,  dmg: 34, speed: 820, lifetime: 1500, radius: 4, pierce: true, charge: 0.35, rarity: "rare" },
+  laser:            { id: "laser",            name: "Laser Rifle",      cooldown: 0.45, dmg: 20, speed: 1400, lifetime: 900, radius: 3, pierce: true, rarity: "epic" },
+  railgun:          { id: "railgun",          name: "Railgun",          cooldown: 1.8,  dmg: 60, speed: 1600, lifetime: 1400, radius: 3, pierce: true, charge: 0.8, rarity: "legendary" },
+  plasma:           { id: "plasma",           name: "Plasma Gun",       cooldown: 0.5,  dmg: 18, speed: 520, lifetime: 1200, radius: 6, splash: 30, rarity: "epic" },
+  flamethrower:     { id: "flamethrower",     name: "Flamethrower",     cooldown: 0.09, dmg: 4,  speed: 300, lifetime: 320, radius: 6, pellets: 3, spread: 0.45, rarity: "rare" },
+  minigun:          { id: "minigun",          name: "Minigun",          cooldown: 0.06, dmg: 4,  speed: 700, lifetime: 1000, radius: 3, spread: 0.18, rarity: "epic" },
+  boomerang:        { id: "boomerang",        name: "Boomerang",        cooldown: 0.9,  dmg: 22, speed: 460, lifetime: 1800, radius: 6, bouncing: { bounces: 6, fuse: 1800 }, rarity: "rare" },
+  shuriken:         { id: "shuriken",         name: "Shuriken",         cooldown: 0.4,  dmg: 11, speed: 700, lifetime: 900, radius: 4, pellets: 3, spread: 0.22, pierce: true, rarity: "rare" },
+  katana:           { id: "katana",           name: "Katana",           cooldown: 0.25, dmg: 19, speed: 0, lifetime: 160, radius: 0, melee: { range: 64, arc: Math.PI * 0.5 }, rarity: "epic" },
+  warhammer:        { id: "warhammer",        name: "Warhammer",        cooldown: 0.95, dmg: 55, speed: 0, lifetime: 260, radius: 0, melee: { range: 70, arc: Math.PI * 0.6 }, rarity: "epic" },
+  scythe:           { id: "scythe",           name: "Scythe",           cooldown: 0.6,  dmg: 30, speed: 0, lifetime: 240, radius: 0, melee: { range: 82, arc: Math.PI * 1.1 }, rarity: "legendary" },
+  revolver:         { id: "revolver",         name: "Revolver",         cooldown: 0.5,  dmg: 26, speed: 700, lifetime: 1400, radius: 4, rarity: "common" },
+  autoshotgun:      { id: "autoshotgun",      name: "Auto Shotgun",     cooldown: 0.45, dmg: 7,  speed: 500, lifetime: 650, radius: 4, pellets: 6, spread: 0.5, rarity: "epic" },
+  grenade_launcher: { id: "grenade_launcher", name: "Grenade Launcher", cooldown: 0.9,  dmg: 24, speed: 460, lifetime: 1500, radius: 6, splash: 62, bouncing: { bounces: 2, fuse: 1000 }, rarity: "epic" },
+  cluster_bomb:     { id: "cluster_bomb",     name: "Cluster Bomb",     cooldown: 2.4,  dmg: 34, speed: 380, lifetime: 1600, radius: 8, splash: 130, bouncing: { bounces: 1, fuse: 1300 }, rarity: "legendary" },
+  freeze_ray:       { id: "freeze_ray",       name: "Freeze Ray",       cooldown: 1.3,  dmg: 6,  speed: 600, lifetime: 900, radius: 5, immobilize: 1800, rarity: "rare" },
+  poison_dart:      { id: "poison_dart",      name: "Poison Dart",      cooldown: 0.55, dmg: 14, speed: 760, lifetime: 1200, radius: 3, pierce: true, immobilize: 400, rarity: "rare" },
+  lightning:        { id: "lightning",        name: "Lightning Coil",   cooldown: 1.0,  dmg: 24, speed: 1500, lifetime: 700, radius: 4, pierce: true, immobilize: 500, rarity: "epic" },
+  blackhole:        { id: "blackhole",        name: "Black Hole",       cooldown: 9.0,  dmg: 45, speed: 160, lifetime: 4000, radius: 12, splash: 200, homing: { turn: 1.4, range: 900 }, immobilize: 900, rarity: "legendary" },
+  turret:           { id: "turret",           name: "Turret",           cooldown: 2.2,  dmg: 40, speed: 0, lifetime: 14000, radius: 9, splash: 55, placeable: { armTime: 700, trigger: 44 }, rarity: "epic" },
+  drone_swarm:      { id: "drone_swarm",      name: "Drone Swarm",      cooldown: 5.5,  dmg: 8,  speed: 280, lifetime: 7000, radius: 5, homing: { turn: 2.4, range: 850 }, summon: 4, rarity: "legendary" },
+  javelin:          { id: "javelin",          name: "Javelin",          cooldown: 1.1,  dmg: 42, speed: 900, lifetime: 1300, radius: 4, pierce: true, rarity: "epic" },
+  bazooka:          { id: "bazooka",          name: "Bazooka",          cooldown: 1.7,  dmg: 44, speed: 380, lifetime: 2200, radius: 8, splash: 90, rarity: "epic" },
+  icicle:           { id: "icicle",           name: "Icicle Launcher",  cooldown: 0.8,  dmg: 12, speed: 640, lifetime: 1100, radius: 4, pellets: 3, spread: 0.3, immobilize: 500, rarity: "rare" },
+  acid_spitter:     { id: "acid_spitter",     name: "Acid Spitter",     cooldown: 0.65, dmg: 13, speed: 430, lifetime: 900, radius: 5, pellets: 2, spread: 0.25, splash: 28, rarity: "rare" },
+  gauss_rifle:      { id: "gauss_rifle",      name: "Gauss Rifle",      cooldown: 1.4,  dmg: 52, speed: 1300, lifetime: 1500, radius: 3, charge: 0.5, pierce: true, rarity: "legendary" },
 };
 
 export const WEAPON_ORDER: WeaponId[] = [
@@ -62,12 +94,19 @@ export const WEAPON_ORDER: WeaponId[] = [
   "tracking_missile", "nuke", "grenade", "mini_soldiers",
   "dual_pistols", "chain", "battleaxe", "spear",
   "army", "smg", "flak", "crossbow",
+  "laser", "railgun", "plasma", "flamethrower", "minigun",
+  "boomerang", "shuriken", "katana", "warhammer", "scythe",
+  "revolver", "autoshotgun", "grenade_launcher", "cluster_bomb",
+  "freeze_ray", "poison_dart", "lightning", "blackhole",
+  "turret", "drone_swarm", "javelin", "bazooka",
+  "icicle", "acid_spitter", "gauss_rifle",
 ];
 
 export const ALL_WEAPONS = WEAPON_ORDER;
 export const WEAPON_ROLL_COST = 4;
 export const STARTING_WEAPONS: WeaponId[] = ["pistol"];
 export const MAX_INVENTORY = 18;
+
 export const MAX_HOTBAR = 4;
 
 export function isWeaponId(v: unknown): v is WeaponId {

@@ -22,6 +22,22 @@ import {
   type WeaponId,
   type Upgrades,
 } from "@/lib/arena/weapons";
+import {
+  buildWorld,
+  decodeConfig,
+  resolveCircle,
+  safeSpawn,
+  randomLootWeapon,
+  MEDKIT_HEAL,
+  PICKUP_R,
+  PICKUP_RESPAWN_MS,
+  PUBLIC_CONFIG,
+  DEFAULT_CONFIG,
+  MAP_SIZES,
+  type RoomConfig,
+  type World,
+} from "@/lib/arena/world";
+
 
 export const Route = createFileRoute("/room/$code")({
   head: () => ({
@@ -30,10 +46,11 @@ export const Route = createFileRoute("/room/$code")({
   component: RoomPage,
 });
 
-const ARENA_W = 1200;
-const ARENA_H = 700;
+const VIEW_W = 1200;
+const VIEW_H = 700;
 const PLAYER_R = 18;
 const BASE_SPEED = 260;
+const ADMIN_HP = 99999;
 
 /** Cooperative AI squad — one ranged, one summoner, one melee. */
 type BotDef = {
@@ -46,6 +63,7 @@ const BOT_DEFS: BotDef[] = [
   { id: "bot:melee",    name: "Brute",   color: "#ef4444", weapon: "battleaxe",     hp: 190, speed: 235, keep: 0,   range: 62  },
 ];
 const isBot = (id: string) => id.startsWith("bot:");
+
 
 type Player = {
   id: string;
@@ -121,15 +139,26 @@ function RoomPage() {
   const [showScoreboard, setShowScoreboard] = useState(false);
   // Hydrate room name client-side to avoid SSR mismatch
   const [roomName, setRoomName] = useState<string>(code);
+  const [config, setConfig] = useState<RoomConfig>(code === "PUBLIC" ? PUBLIC_CONFIG : DEFAULT_CONFIG);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (code === "PUBLIC") { setRoomName("Public Arena"); return; }
+    if (code === "PUBLIC") { setRoomName("Public Arena"); setConfig(PUBLIC_CONFIG); return; }
     try {
       const stored = sessionStorage.getItem(`arena.roomName.${code}`);
       if (stored) setRoomName(stored);
+      const fromUrl = new URLSearchParams(window.location.search).get("c");
+      const fromStore = sessionStorage.getItem(`arena.roomConfig.${code}`);
+      const cfg = decodeConfig(fromUrl) ?? decodeConfig(fromStore);
+      if (cfg) {
+        setConfig(cfg);
+        sessionStorage.setItem(`arena.roomConfig.${code}`, fromUrl ?? fromStore ?? "");
+      }
     } catch { /* ignore */ }
   }, [code]);
+
+  const world: World = useMemo(() => buildWorld(code, config), [code, config]);
+
 
   useEffect(() => {
     const onChange = () => setIsFullscreen(!!document.fullscreenElement);
@@ -176,7 +205,7 @@ function RoomPage() {
   const swingsRef = useRef<SwingFx[]>([]);
   const boomsRef = useRef<BoomFx[]>([]);
   const keysRef = useRef<Set<string>>(new Set());
-  const mouseRef = useRef({ x: ARENA_W / 2, y: ARENA_H / 2, down: false });
+  const mouseRef = useRef({ x: 0, y: 0, down: false });
   const channelRef = useRef<RealtimeChannel | null>(null);
   const weaponRef = useRef<WeaponId>("pistol");
   const lastFireRef = useRef<Record<WeaponId, number>>(emptyCooldowns());
@@ -274,8 +303,7 @@ function RoomPage() {
     const me: Player = {
       id: meRef.current.id,
       name: meRef.current.name,
-      x: Math.random() * (ARENA_W - 200) + 100,
-      y: Math.random() * (ARENA_H - 200) + 100,
+      ...safeSpawn(world),
       color: colorFor(meRef.current.id),
       hp: maxHp(upgradesRef.current),
       maxHp: maxHp(upgradesRef.current),
@@ -331,8 +359,8 @@ function RoomPage() {
             if (self) {
               self.maxHp = maxHp(self.upgrades);
               self.hp = self.maxHp;
-              self.x = Math.random() * (ARENA_W - 200) + 100;
-              self.y = Math.random() * (ARENA_H - 200) + 100;
+              const sp = safeSpawn(world);
+              self.x = sp.x; self.y = sp.y;
               self.immobilizedUntil = 0;
               setHpUi({ hp: self.hp, max: self.maxHp });
             }
@@ -367,8 +395,8 @@ function RoomPage() {
             playersRef.current.set(id, {
               id,
               name: meta?.name ?? "???",
-              x: ARENA_W / 2,
-              y: ARENA_H / 2,
+              x: world.w / 2,
+              y: world.h / 2,
               color: meta?.color ?? colorFor(id),
               hp: 100,
               maxHp: 100,
@@ -495,8 +523,8 @@ function RoomPage() {
     const canvas = canvasRef.current!;
     const onMouseMove = (e: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
-      mouseRef.current.x = ((e.clientX - rect.left) / rect.width) * ARENA_W;
-      mouseRef.current.y = ((e.clientY - rect.top) / rect.height) * ARENA_H;
+      mouseRef.current.x = ((e.clientX - rect.left) / rect.width) * VIEW_W + cam.x;
+      mouseRef.current.y = ((e.clientY - rect.top) / rect.height) * VIEW_H + cam.y;
     };
     const onMouseDown = () => {
       mouseRef.current.down = true;
@@ -626,8 +654,7 @@ function RoomPage() {
         if (!playersRef.current.has(def.id)) {
           playersRef.current.set(def.id, {
             id: def.id, name: def.name,
-            x: Math.random() * (ARENA_W - 300) + 150,
-            y: Math.random() * (ARENA_H - 300) + 150,
+            ...safeSpawn(world),
             color: def.color, hp: def.hp, maxHp: def.hp, kills: 0,
             upgrades: { ...ZERO_UPGRADES }, aim: 0, immobilizedUntil: 0,
           });
@@ -723,8 +750,8 @@ function RoomPage() {
           else if (now >= st.respawnAt) {
             st.respawnAt = 0;
             bot.hp = bot.maxHp;
-            bot.x = Math.random() * (ARENA_W - 300) + 150;
-            bot.y = Math.random() * (ARENA_H - 300) + 150;
+            const bsp = safeSpawn(world);
+            bot.x = bsp.x; bot.y = bsp.y;
           }
           continue;
         }
@@ -744,8 +771,10 @@ function RoomPage() {
           const ang = Math.atan2(dy, dx) + strafe * 0.6;
           bot.x += Math.cos(ang) * moveDir * def.speed * dt;
           bot.y += Math.sin(ang) * moveDir * def.speed * dt;
-          bot.x = Math.max(PLAYER_R, Math.min(ARENA_W - PLAYER_R, bot.x));
-          bot.y = Math.max(PLAYER_R, Math.min(ARENA_H - PLAYER_R, bot.y));
+          bot.x = Math.max(PLAYER_R, Math.min(world.w - PLAYER_R, bot.x));
+          bot.y = Math.max(PLAYER_R, Math.min(world.h - PLAYER_R, bot.y));
+          const bfix = resolveCircle(world.obstacles, bot.x, bot.y, PLAYER_R);
+          bot.x = bfix.x; bot.y = bfix.y;
         }
 
         const w = WEAPONS[def.weapon];
@@ -973,8 +1002,10 @@ function RoomPage() {
             const sp = BASE_SPEED * speedMult(self.upgrades);
             self.x += (dx / len) * sp * dt;
             self.y += (dy / len) * sp * dt;
-            self.x = Math.max(PLAYER_R, Math.min(ARENA_W - PLAYER_R, self.x));
-            self.y = Math.max(PLAYER_R, Math.min(ARENA_H - PLAYER_R, self.y));
+            self.x = Math.max(PLAYER_R, Math.min(world.w - PLAYER_R, self.x));
+            self.y = Math.max(PLAYER_R, Math.min(world.h - PLAYER_R, self.y));
+            const fix = resolveCircle(world.obstacles, self.x, self.y, PLAYER_R);
+            self.x = fix.x; self.y = fix.y;
           }
         }
         self.aim = currentAimAngle(self);
@@ -1021,12 +1052,12 @@ function RoomPage() {
         b.y += b.vy * dt;
 
         // Wall handling
-        const offX = b.x < 0 || b.x > ARENA_W;
-        const offY = b.y < 0 || b.y > ARENA_H;
+        const offX = b.x < 0 || b.x > world.w;
+        const offY = b.y < 0 || b.y > world.h;
         if (offX || offY) {
           if (b.bouncesLeft && b.bouncesLeft > 0 && isMine(b.owner)) {
-            if (offX) { b.vx = -b.vx; b.x = Math.max(0, Math.min(ARENA_W, b.x)); }
-            if (offY) { b.vy = -b.vy; b.y = Math.max(0, Math.min(ARENA_H, b.y)); }
+            if (offX) { b.vx = -b.vx; b.x = Math.max(0, Math.min(world.w, b.x)); }
+            if (offY) { b.vy = -b.vy; b.y = Math.max(0, Math.min(world.h, b.y)); }
             b.bouncesLeft -= 1;
           } else {
             if (b.splash && isMine(b.owner)) explode(b);
@@ -1141,19 +1172,64 @@ function RoomPage() {
     }
 
     function render(ctx: CanvasRenderingContext2D, now: number, self: Player | null) {
+      // Camera follows the local player, clamped to the world
+      cam.x = Math.max(0, Math.min(world.w - VIEW_W, (self?.x ?? world.w / 2) - VIEW_W / 2));
+      cam.y = Math.max(0, Math.min(world.h - VIEW_H, (self?.y ?? world.h / 2) - VIEW_H / 2));
+      if (world.w < VIEW_W) cam.x = (world.w - VIEW_W) / 2;
+      if (world.h < VIEW_H) cam.y = (world.h - VIEW_H) / 2;
+
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = "#080c15";
+      ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+      ctx.translate(-cam.x, -cam.y);
+
       ctx.fillStyle = "#0d1320";
-      ctx.fillRect(0, 0, ARENA_W, ARENA_H);
+      ctx.fillRect(0, 0, world.w, world.h);
       ctx.strokeStyle = "rgba(255,255,255,0.04)";
       ctx.lineWidth = 1;
-      for (let x = 0; x < ARENA_W; x += 50) {
-        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ARENA_H); ctx.stroke();
+      const gx0 = Math.floor(cam.x / 50) * 50;
+      const gy0 = Math.floor(cam.y / 50) * 50;
+      for (let x = gx0; x < cam.x + VIEW_W; x += 50) {
+        ctx.beginPath(); ctx.moveTo(x, cam.y); ctx.lineTo(x, cam.y + VIEW_H); ctx.stroke();
       }
-      for (let y = 0; y < ARENA_H; y += 50) {
-        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(ARENA_W, y); ctx.stroke();
+      for (let y = gy0; y < cam.y + VIEW_H; y += 50) {
+        ctx.beginPath(); ctx.moveTo(cam.x, y); ctx.lineTo(cam.x + VIEW_W, y); ctx.stroke();
       }
       ctx.strokeStyle = "rgba(255,255,255,0.15)";
       ctx.lineWidth = 2;
-      ctx.strokeRect(0, 0, ARENA_W, ARENA_H);
+      ctx.strokeRect(0, 0, world.w, world.h);
+
+      // Terrain
+      for (const o of world.obstacles) {
+        if (o.x > cam.x + VIEW_W || o.x + o.w < cam.x || o.y > cam.y + VIEW_H || o.y + o.h < cam.y) continue;
+        ctx.fillStyle = "#1c2740";
+        ctx.fillRect(o.x, o.y, o.w, o.h);
+        ctx.strokeStyle = "rgba(255,255,255,0.12)";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(o.x, o.y, o.w, o.h);
+      }
+
+      // Pickups
+      for (const p of world.pickups) {
+        if (takenRef.current.get(p.id) ?? 0 > now) continue;
+        if ((takenRef.current.get(p.id) ?? 0) > now) continue;
+        if (p.x > cam.x + VIEW_W + 40 || p.x < cam.x - 40 || p.y > cam.y + VIEW_H + 40 || p.y < cam.y - 40) continue;
+        const bob = Math.sin(now / 400 + p.x) * 2;
+        if (p.kind === "medkit") {
+          ctx.fillStyle = "#f8fafc";
+          ctx.fillRect(p.x - 11, p.y - 11 + bob, 22, 22);
+          ctx.fillStyle = "#ef4444";
+          ctx.fillRect(p.x - 7, p.y - 2.5 + bob, 14, 5);
+          ctx.fillRect(p.x - 2.5, p.y - 7 + bob, 5, 14);
+        } else {
+          ctx.fillStyle = "#fbbf24";
+          ctx.fillRect(p.x - 12, p.y - 10 + bob, 24, 20);
+          ctx.fillStyle = "#78350f";
+          ctx.fillRect(p.x - 12, p.y - 2 + bob, 24, 4);
+          ctx.fillRect(p.x - 2, p.y - 10 + bob, 4, 20);
+        }
+      }
+
 
       for (const b of boomsRef.current) {
         const age = (now - b.born) / 400;
@@ -1291,7 +1367,7 @@ function RoomPage() {
       channel.unsubscribe();
       supabase.removeChannel(channel);
     };
-  }, [code, roomName]);
+  }, [code, roomName, world, config]);
 
   const shareUrl = useMemo(() => {
     if (typeof window === "undefined") return "";
@@ -1355,10 +1431,10 @@ function RoomPage() {
             <div className={`overflow-hidden ${isTouch ? "h-full w-full" : "rounded-xl border border-foreground/10 bg-black shadow-2xl"}`}>
               <canvas
                 ref={canvasRef}
-                width={ARENA_W}
-                height={ARENA_H}
+                width={VIEW_W}
+                height={VIEW_H}
                 className={`block cursor-crosshair touch-none select-none ${isTouch ? "h-full w-full object-contain" : "w-full"}`}
-                style={isTouch ? undefined : { aspectRatio: `${ARENA_W} / ${ARENA_H}` }}
+                style={isTouch ? undefined : { aspectRatio: `${VIEW_W} / ${VIEW_H}` }}
               />
             </div>
             {/* Hotbar (desktop) */}
