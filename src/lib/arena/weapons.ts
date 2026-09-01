@@ -2,7 +2,14 @@ export type WeaponId =
   | "pistol" | "shotgun" | "sniper" | "rocket" | "mine" | "sword"
   | "tracking_missile" | "nuke" | "grenade" | "mini_soldiers"
   | "dual_pistols" | "chain" | "battleaxe" | "spear"
-  | "army" | "smg" | "flak" | "crossbow";
+  | "army" | "smg" | "flak" | "crossbow"
+  | "laser" | "railgun" | "plasma" | "flamethrower" | "minigun"
+  | "boomerang" | "shuriken" | "katana" | "warhammer" | "scythe"
+  | "revolver" | "autoshotgun" | "grenade_launcher" | "cluster_bomb"
+  | "freeze_ray" | "poison_dart" | "lightning" | "blackhole"
+  | "turret" | "drone_swarm" | "javelin" | "bazooka"
+  | "icicle" | "acid_spitter" | "gauss_rifle";
+
 
 export type Rarity = "common" | "rare" | "epic" | "legendary";
 
