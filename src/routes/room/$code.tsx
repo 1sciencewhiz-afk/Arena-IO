@@ -139,15 +139,26 @@ function RoomPage() {
   const [showScoreboard, setShowScoreboard] = useState(false);
   // Hydrate room name client-side to avoid SSR mismatch
   const [roomName, setRoomName] = useState<string>(code);
+  const [config, setConfig] = useState<RoomConfig>(code === "PUBLIC" ? PUBLIC_CONFIG : DEFAULT_CONFIG);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (code === "PUBLIC") { setRoomName("Public Arena"); return; }
+    if (code === "PUBLIC") { setRoomName("Public Arena"); setConfig(PUBLIC_CONFIG); return; }
     try {
       const stored = sessionStorage.getItem(`arena.roomName.${code}`);
       if (stored) setRoomName(stored);
+      const fromUrl = new URLSearchParams(window.location.search).get("c");
+      const fromStore = sessionStorage.getItem(`arena.roomConfig.${code}`);
+      const cfg = decodeConfig(fromUrl) ?? decodeConfig(fromStore);
+      if (cfg) {
+        setConfig(cfg);
+        sessionStorage.setItem(`arena.roomConfig.${code}`, fromUrl ?? fromStore ?? "");
+      }
     } catch { /* ignore */ }
   }, [code]);
+
+  const world: World = useMemo(() => buildWorld(code, config), [code, config]);
+
 
   useEffect(() => {
     const onChange = () => setIsFullscreen(!!document.fullscreenElement);
