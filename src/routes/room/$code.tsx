@@ -205,7 +205,7 @@ function RoomPage() {
   const swingsRef = useRef<SwingFx[]>([]);
   const boomsRef = useRef<BoomFx[]>([]);
   const keysRef = useRef<Set<string>>(new Set());
-  const mouseRef = useRef({ x: ARENA_W / 2, y: ARENA_H / 2, down: false });
+  const mouseRef = useRef({ x: 0, y: 0, down: false });
   const channelRef = useRef<RealtimeChannel | null>(null);
   const weaponRef = useRef<WeaponId>("pistol");
   const lastFireRef = useRef<Record<WeaponId, number>>(emptyCooldowns());
@@ -303,8 +303,7 @@ function RoomPage() {
     const me: Player = {
       id: meRef.current.id,
       name: meRef.current.name,
-      x: Math.random() * (ARENA_W - 200) + 100,
-      y: Math.random() * (ARENA_H - 200) + 100,
+      ...safeSpawn(world),
       color: colorFor(meRef.current.id),
       hp: maxHp(upgradesRef.current),
       maxHp: maxHp(upgradesRef.current),
@@ -360,8 +359,8 @@ function RoomPage() {
             if (self) {
               self.maxHp = maxHp(self.upgrades);
               self.hp = self.maxHp;
-              self.x = Math.random() * (ARENA_W - 200) + 100;
-              self.y = Math.random() * (ARENA_H - 200) + 100;
+              const sp = safeSpawn(world);
+              self.x = sp.x; self.y = sp.y;
               self.immobilizedUntil = 0;
               setHpUi({ hp: self.hp, max: self.maxHp });
             }
@@ -396,8 +395,8 @@ function RoomPage() {
             playersRef.current.set(id, {
               id,
               name: meta?.name ?? "???",
-              x: ARENA_W / 2,
-              y: ARENA_H / 2,
+              x: world.w / 2,
+              y: world.h / 2,
               color: meta?.color ?? colorFor(id),
               hp: 100,
               maxHp: 100,
@@ -524,8 +523,8 @@ function RoomPage() {
     const canvas = canvasRef.current!;
     const onMouseMove = (e: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
-      mouseRef.current.x = ((e.clientX - rect.left) / rect.width) * ARENA_W;
-      mouseRef.current.y = ((e.clientY - rect.top) / rect.height) * ARENA_H;
+      mouseRef.current.x = ((e.clientX - rect.left) / rect.width) * VIEW_W + cam.x;
+      mouseRef.current.y = ((e.clientY - rect.top) / rect.height) * VIEW_H + cam.y;
     };
     const onMouseDown = () => {
       mouseRef.current.down = true;
@@ -655,8 +654,7 @@ function RoomPage() {
         if (!playersRef.current.has(def.id)) {
           playersRef.current.set(def.id, {
             id: def.id, name: def.name,
-            x: Math.random() * (ARENA_W - 300) + 150,
-            y: Math.random() * (ARENA_H - 300) + 150,
+            ...safeSpawn(world),
             color: def.color, hp: def.hp, maxHp: def.hp, kills: 0,
             upgrades: { ...ZERO_UPGRADES }, aim: 0, immobilizedUntil: 0,
           });
@@ -752,8 +750,8 @@ function RoomPage() {
           else if (now >= st.respawnAt) {
             st.respawnAt = 0;
             bot.hp = bot.maxHp;
-            bot.x = Math.random() * (ARENA_W - 300) + 150;
-            bot.y = Math.random() * (ARENA_H - 300) + 150;
+            const bsp = safeSpawn(world);
+            bot.x = bsp.x; bot.y = bsp.y;
           }
           continue;
         }
@@ -773,8 +771,10 @@ function RoomPage() {
           const ang = Math.atan2(dy, dx) + strafe * 0.6;
           bot.x += Math.cos(ang) * moveDir * def.speed * dt;
           bot.y += Math.sin(ang) * moveDir * def.speed * dt;
-          bot.x = Math.max(PLAYER_R, Math.min(ARENA_W - PLAYER_R, bot.x));
-          bot.y = Math.max(PLAYER_R, Math.min(ARENA_H - PLAYER_R, bot.y));
+          bot.x = Math.max(PLAYER_R, Math.min(world.w - PLAYER_R, bot.x));
+          bot.y = Math.max(PLAYER_R, Math.min(world.h - PLAYER_R, bot.y));
+          const bfix = resolveCircle(world.obstacles, bot.x, bot.y, PLAYER_R);
+          bot.x = bfix.x; bot.y = bfix.y;
         }
 
         const w = WEAPONS[def.weapon];
@@ -1002,8 +1002,10 @@ function RoomPage() {
             const sp = BASE_SPEED * speedMult(self.upgrades);
             self.x += (dx / len) * sp * dt;
             self.y += (dy / len) * sp * dt;
-            self.x = Math.max(PLAYER_R, Math.min(ARENA_W - PLAYER_R, self.x));
-            self.y = Math.max(PLAYER_R, Math.min(ARENA_H - PLAYER_R, self.y));
+            self.x = Math.max(PLAYER_R, Math.min(world.w - PLAYER_R, self.x));
+            self.y = Math.max(PLAYER_R, Math.min(world.h - PLAYER_R, self.y));
+            const fix = resolveCircle(world.obstacles, self.x, self.y, PLAYER_R);
+            self.x = fix.x; self.y = fix.y;
           }
         }
         self.aim = currentAimAngle(self);
@@ -1050,12 +1052,12 @@ function RoomPage() {
         b.y += b.vy * dt;
 
         // Wall handling
-        const offX = b.x < 0 || b.x > ARENA_W;
-        const offY = b.y < 0 || b.y > ARENA_H;
+        const offX = b.x < 0 || b.x > world.w;
+        const offY = b.y < 0 || b.y > world.h;
         if (offX || offY) {
           if (b.bouncesLeft && b.bouncesLeft > 0 && isMine(b.owner)) {
-            if (offX) { b.vx = -b.vx; b.x = Math.max(0, Math.min(ARENA_W, b.x)); }
-            if (offY) { b.vy = -b.vy; b.y = Math.max(0, Math.min(ARENA_H, b.y)); }
+            if (offX) { b.vx = -b.vx; b.x = Math.max(0, Math.min(world.w, b.x)); }
+            if (offY) { b.vy = -b.vy; b.y = Math.max(0, Math.min(world.h, b.y)); }
             b.bouncesLeft -= 1;
           } else {
             if (b.splash && isMine(b.owner)) explode(b);
@@ -1320,7 +1322,7 @@ function RoomPage() {
       channel.unsubscribe();
       supabase.removeChannel(channel);
     };
-  }, [code, roomName]);
+  }, [code, roomName, world, config]);
 
   const shareUrl = useMemo(() => {
     if (typeof window === "undefined") return "";
@@ -1384,10 +1386,10 @@ function RoomPage() {
             <div className={`overflow-hidden ${isTouch ? "h-full w-full" : "rounded-xl border border-foreground/10 bg-black shadow-2xl"}`}>
               <canvas
                 ref={canvasRef}
-                width={ARENA_W}
-                height={ARENA_H}
+                width={VIEW_W}
+                height={VIEW_H}
                 className={`block cursor-crosshair touch-none select-none ${isTouch ? "h-full w-full object-contain" : "w-full"}`}
-                style={isTouch ? undefined : { aspectRatio: `${ARENA_W} / ${ARENA_H}` }}
+                style={isTouch ? undefined : { aspectRatio: `${VIEW_W} / ${VIEW_H}` }}
               />
             </div>
             {/* Hotbar (desktop) */}
