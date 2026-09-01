@@ -1172,19 +1172,64 @@ function RoomPage() {
     }
 
     function render(ctx: CanvasRenderingContext2D, now: number, self: Player | null) {
+      // Camera follows the local player, clamped to the world
+      cam.x = Math.max(0, Math.min(world.w - VIEW_W, (self?.x ?? world.w / 2) - VIEW_W / 2));
+      cam.y = Math.max(0, Math.min(world.h - VIEW_H, (self?.y ?? world.h / 2) - VIEW_H / 2));
+      if (world.w < VIEW_W) cam.x = (world.w - VIEW_W) / 2;
+      if (world.h < VIEW_H) cam.y = (world.h - VIEW_H) / 2;
+
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = "#080c15";
+      ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+      ctx.translate(-cam.x, -cam.y);
+
       ctx.fillStyle = "#0d1320";
-      ctx.fillRect(0, 0, ARENA_W, ARENA_H);
+      ctx.fillRect(0, 0, world.w, world.h);
       ctx.strokeStyle = "rgba(255,255,255,0.04)";
       ctx.lineWidth = 1;
-      for (let x = 0; x < ARENA_W; x += 50) {
-        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ARENA_H); ctx.stroke();
+      const gx0 = Math.floor(cam.x / 50) * 50;
+      const gy0 = Math.floor(cam.y / 50) * 50;
+      for (let x = gx0; x < cam.x + VIEW_W; x += 50) {
+        ctx.beginPath(); ctx.moveTo(x, cam.y); ctx.lineTo(x, cam.y + VIEW_H); ctx.stroke();
       }
-      for (let y = 0; y < ARENA_H; y += 50) {
-        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(ARENA_W, y); ctx.stroke();
+      for (let y = gy0; y < cam.y + VIEW_H; y += 50) {
+        ctx.beginPath(); ctx.moveTo(cam.x, y); ctx.lineTo(cam.x + VIEW_W, y); ctx.stroke();
       }
       ctx.strokeStyle = "rgba(255,255,255,0.15)";
       ctx.lineWidth = 2;
-      ctx.strokeRect(0, 0, ARENA_W, ARENA_H);
+      ctx.strokeRect(0, 0, world.w, world.h);
+
+      // Terrain
+      for (const o of world.obstacles) {
+        if (o.x > cam.x + VIEW_W || o.x + o.w < cam.x || o.y > cam.y + VIEW_H || o.y + o.h < cam.y) continue;
+        ctx.fillStyle = "#1c2740";
+        ctx.fillRect(o.x, o.y, o.w, o.h);
+        ctx.strokeStyle = "rgba(255,255,255,0.12)";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(o.x, o.y, o.w, o.h);
+      }
+
+      // Pickups
+      for (const p of world.pickups) {
+        if (takenRef.current.get(p.id) ?? 0 > now) continue;
+        if ((takenRef.current.get(p.id) ?? 0) > now) continue;
+        if (p.x > cam.x + VIEW_W + 40 || p.x < cam.x - 40 || p.y > cam.y + VIEW_H + 40 || p.y < cam.y - 40) continue;
+        const bob = Math.sin(now / 400 + p.x) * 2;
+        if (p.kind === "medkit") {
+          ctx.fillStyle = "#f8fafc";
+          ctx.fillRect(p.x - 11, p.y - 11 + bob, 22, 22);
+          ctx.fillStyle = "#ef4444";
+          ctx.fillRect(p.x - 7, p.y - 2.5 + bob, 14, 5);
+          ctx.fillRect(p.x - 2.5, p.y - 7 + bob, 5, 14);
+        } else {
+          ctx.fillStyle = "#fbbf24";
+          ctx.fillRect(p.x - 12, p.y - 10 + bob, 24, 20);
+          ctx.fillStyle = "#78350f";
+          ctx.fillRect(p.x - 12, p.y - 2 + bob, 24, 4);
+          ctx.fillRect(p.x - 2, p.y - 10 + bob, 4, 20);
+        }
+      }
+
 
       for (const b of boomsRef.current) {
         const age = (now - b.born) / 400;
