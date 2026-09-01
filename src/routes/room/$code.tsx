@@ -30,10 +30,11 @@ export const Route = createFileRoute("/room/$code")({
   component: RoomPage,
 });
 
-const ARENA_W = 1200;
-const ARENA_H = 700;
+const VIEW_W = 1200;
+const VIEW_H = 700;
 const PLAYER_R = 18;
 const BASE_SPEED = 260;
+const ADMIN_HP = 99999;
 
 /** Cooperative AI squad — one ranged, one summoner, one melee. */
 type BotDef = {
@@ -46,6 +47,7 @@ const BOT_DEFS: BotDef[] = [
   { id: "bot:melee",    name: "Brute",   color: "#ef4444", weapon: "battleaxe",     hp: 190, speed: 235, keep: 0,   range: 62  },
 ];
 const isBot = (id: string) => id.startsWith("bot:");
+
 
 type Player = {
   id: string;
