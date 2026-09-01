@@ -105,7 +105,7 @@ export const WEAPON_ORDER: WeaponId[] = [
 export const ALL_WEAPONS = WEAPON_ORDER;
 export const WEAPON_ROLL_COST = 4;
 export const STARTING_WEAPONS: WeaponId[] = ["pistol"];
-export const MAX_INVENTORY = 43;
+export const MAX_INVENTORY = 18;
 
 export const MAX_HOTBAR = 4;
 
