@@ -22,6 +22,22 @@ import {
   type WeaponId,
   type Upgrades,
 } from "@/lib/arena/weapons";
+import {
+  buildWorld,
+  decodeConfig,
+  resolveCircle,
+  safeSpawn,
+  randomLootWeapon,
+  MEDKIT_HEAL,
+  PICKUP_R,
+  PICKUP_RESPAWN_MS,
+  PUBLIC_CONFIG,
+  DEFAULT_CONFIG,
+  MAP_SIZES,
+  type RoomConfig,
+  type World,
+} from "@/lib/arena/world";
+
 
 export const Route = createFileRoute("/room/$code")({
   head: () => ({
