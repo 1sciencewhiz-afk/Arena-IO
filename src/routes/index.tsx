@@ -3,6 +3,14 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { subscribeLobby, type LobbyRoom } from "@/lib/arena/lobby";
+import {
+  DEFAULT_CONFIG,
+  MAP_SIZES,
+  TERRAINS,
+  encodeConfig,
+  type MapSizeId,
+  type RoomConfig,
+} from "@/lib/arena/world";
 import { useAuthUser, useProfile, signOut, useIsAdmin } from "@/lib/arena/auth";
 import { useLoadout } from "@/lib/arena/loadout";
 import { Armory } from "@/components/arena/Armory";
