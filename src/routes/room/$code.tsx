@@ -418,7 +418,7 @@ function RoomPage() {
           kills: number; color: string; upgrades: Upgrades; aim?: number;
         };
         if (!p || typeof p.id !== "string") return;
-        const safeMaxHp = clampNum(p.maxHp, 1, 1000, 100);
+        const safeMaxHp = clampNum(p.maxHp, 1, 99999, 100);
         const safeHp = clampNum(p.hp, 0, safeMaxHp, safeMaxHp);
         const safeKills = clampNum(p.kills, 0, 100000, 0);
         const rawU = (p.upgrades ?? ZERO_UPGRADES) as Upgrades;
