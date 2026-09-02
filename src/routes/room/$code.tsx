@@ -978,6 +978,60 @@ function RoomPage() {
       return rest as Projectile;
     }
 
+    /** Projectiles are stopped by terrain, and opposing shots cancel each other out. */
+    function resolveProjectileWorld(now: number) {
+      const dead = new Set<string>();
+      const list = projectilesRef.current;
+
+      // 1. Terrain — only the owner resolves, then tells everyone
+      for (const b of list) {
+        if (!isMine(b.owner)) continue;
+        if (b.weapon === "mine" || WEAPONS[b.weapon]?.summon || b.radius <= 0) continue;
+        if (!circleHitsObstacle(world.obstacles, b.x, b.y, b.radius)) continue;
+        if (b.bouncesLeft && b.bouncesLeft > 0) {
+          const hx = circleHitsObstacle(world.obstacles, b.x + Math.sign(b.vx) * (b.radius + 2), b.y, b.radius);
+          if (hx) b.vx = -b.vx; else b.vy = -b.vy;
+          const fix = resolveCircle(world.obstacles, b.x, b.y, b.radius + 1);
+          b.x = fix.x; b.y = fix.y;
+          b.bouncesLeft -= 1;
+          continue;
+        }
+        if (b.splash) explode(b);
+        dead.add(b.id);
+      }
+
+      // 2. Ranged shots neutralise on contact
+      const cancellable = (p: Projectile) =>
+        !dead.has(p.id) && p.radius > 0 && p.weapon !== "mine" &&
+        !WEAPONS[p.weapon]?.summon && !WEAPONS[p.weapon]?.placeable &&
+        (p.vx !== 0 || p.vy !== 0);
+
+      for (let i = 0; i < list.length; i++) {
+        const a = list[i];
+        if (!cancellable(a)) continue;
+        for (let j = i + 1; j < list.length; j++) {
+          const b = list[j];
+          if (!cancellable(b)) continue;
+          if (a.owner === b.owner) continue;
+          if (isBot(a.owner) && isBot(b.owner)) continue;
+          if (Math.hypot(a.x - b.x, a.y - b.y) > a.radius + b.radius + 4) continue;
+          for (const p of [a, b]) {
+            if (isMine(p.owner) && p.splash) explode(p);
+            dead.add(p.id);
+          }
+          boomsRef.current.push({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, r: 14, born: now, color: "#ffffff" });
+          break;
+        }
+      }
+
+      if (dead.size === 0) return;
+      const mineDead = list.filter((p) => dead.has(p.id) && isMine(p.owner)).map((p) => p.id);
+      projectilesRef.current = list.filter((p) => !dead.has(p.id));
+      if (mineDead.length) {
+        channelRef.current?.send({ type: "broadcast", event: "despawn", payload: { ids: mineDead } });
+      }
+    }
+
     const ctx = canvas.getContext("2d")!;
     let raf = 0;
     let last = performance.now();
