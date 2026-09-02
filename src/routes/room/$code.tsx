@@ -1022,7 +1022,35 @@ function RoomPage() {
         tryFire(now);
       }
 
-      if (hostRef.current) botTick(now, dt);
+      if (hostRef.current && config.bots) botTick(now, dt);
+
+      // Pickups: medkits heal, lootboxes grant a random weapon into the hotbar
+      if (self && self.hp > 0 && config.pickups) {
+        for (const p of world.pickups) {
+          if ((takenRef.current.get(p.id) ?? 0) > now) continue;
+          if (Math.hypot(self.x - p.x, self.y - p.y) > PICKUP_R + PLAYER_R) continue;
+          takenRef.current.set(p.id, now + PICKUP_RESPAWN_MS);
+          channelRef.current?.send({ type: "broadcast", event: "taken", payload: { id: p.id } });
+          if (p.kind === "medkit") {
+            if (self.hp >= self.maxHp) { takenRef.current.delete(p.id); continue; }
+            self.hp = Math.min(self.maxHp, self.hp + MEDKIT_HEAL);
+            setHpUi({ hp: self.hp, max: self.maxHp });
+          } else {
+            const w = randomLootWeapon();
+            weaponRef.current = w;
+            chargeStartRef.current = null;
+            setWeaponUi(w);
+            if (!hotbarRef.current.includes(w)) {
+              hotbarRef.current = [w, ...hotbarRef.current].slice(0, 4);
+            }
+            setLootMsg(`Picked up ${WEAPONS[w].name}!`);
+            window.setTimeout(() => setLootMsg(null), 1800);
+          }
+        }
+      }
+
+      // Projectile vs terrain, and ranged shots neutralising each other
+      resolveProjectileWorld(now);
 
       // Update projectiles + collision
       const alive: Projectile[] = [];
