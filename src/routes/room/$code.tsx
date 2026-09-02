@@ -653,11 +653,13 @@ function RoomPage() {
       other.hp > 0 && other.id !== ownerId && !(isBot(ownerId) && isBot(other.id));
 
     function ensureBots() {
-      for (const def of BOT_DEFS) {
+      // The squad drops in together, clustered around one safe location
+      const spots = groupSpawn(world, BOT_DEFS.length);
+      BOT_DEFS.forEach((def, i) => {
         if (!playersRef.current.has(def.id)) {
           playersRef.current.set(def.id, {
             id: def.id, name: def.name,
-            ...safeSpawn(world),
+            ...spots[i],
             color: def.color, hp: def.hp, maxHp: def.hp, kills: 0,
             upgrades: { ...ZERO_UPGRADES }, aim: 0, immobilizedUntil: 0,
           });
