@@ -42,6 +42,7 @@ function Index() {
   const [code, setCode] = useState("");
   const [roomName, setRoomName] = useState("");
   const [rooms, setRooms] = useState<LobbyRoom[]>([]);
+  const [cfg, setCfg] = useState<RoomConfig>(DEFAULT_CONFIG);
   useEffect(() => subscribeLobby(setRooms), []);
 
   // Hydrate name on client to avoid SSR mismatch
