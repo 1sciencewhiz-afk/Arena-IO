@@ -139,6 +139,7 @@ function RoomPage() {
   const [showHelp, setShowHelp] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showScoreboard, setShowScoreboard] = useState(false);
+  const [lootMsg, setLootMsg] = useState<string | null>(null);
   // Hydrate room name client-side to avoid SSR mismatch
   const [roomName, setRoomName] = useState<string>(code);
   const [config, setConfig] = useState<RoomConfig>(code === "PUBLIC" ? PUBLIC_CONFIG : DEFAULT_CONFIG);
