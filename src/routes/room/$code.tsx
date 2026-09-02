@@ -493,6 +493,11 @@ function RoomPage() {
         const safeImmo = Math.max(0, Math.min(Number(immobilize) || 0, 3000));
         applyDamage(target, by, safeDmg, weapon, safeImmo || undefined);
       })
+      .on("broadcast", { event: "taken" }, ({ payload }) => {
+        const id = (payload as { id?: string })?.id;
+        if (typeof id !== "string") return;
+        takenRef.current.set(id, performance.now() + PICKUP_RESPAWN_MS);
+      })
       .subscribe(async (status) => {
         if (status === "SUBSCRIBED") {
           setConnected(true);
@@ -500,11 +505,11 @@ function RoomPage() {
         }
       });
 
-    const stopAnnounce = announceRoom({
-      roomCode: code,
-      roomName,
-      playerName: me.name,
-    });
+    // Only the public arena is advertised in the lobby — private rooms stay hidden
+    const stopAnnounce =
+      code === "PUBLIC"
+        ? announceRoom({ roomCode: code, roomName, playerName: me.name })
+        : () => {};
 
     const onKeyDown = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
