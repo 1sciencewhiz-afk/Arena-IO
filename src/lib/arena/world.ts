@@ -92,17 +92,32 @@ export function buildWorld(code: string, config: RoomConfig): World {
 
   const area = (w * h) / 1_000_000; // in "million px" units
 
+  /** Reject a rect that comes within `gap` px of an existing one. */
+  const fits = (r: Obstacle, gap: number) =>
+    !obstacles.some(
+      (o) =>
+        r.x < o.x + o.w + gap &&
+        r.x + r.w + gap > o.x &&
+        r.y < o.y + o.h + gap &&
+        r.y + r.h + gap > o.y,
+    );
+
   if (config.terrain === "blocks") {
-    const count = Math.round(28 * area) + 8;
-    for (let i = 0; i < count; i++) {
-      const bw = 60 + rng() * 180;
-      const bh = 60 + rng() * 180;
-      obstacles.push({
-        x: 80 + rng() * (w - 160 - bw),
-        y: 80 + rng() * (h - 160 - bh),
+    const target = Math.round(26 * area) + 8;
+    const GAP = 140; // wide lanes between cover so fights have space
+    let placed = 0;
+    for (let i = 0; i < target * 60 && placed < target; i++) {
+      const bw = 70 + rng() * 150;
+      const bh = 70 + rng() * 150;
+      const r: Obstacle = {
+        x: 120 + rng() * (w - 240 - bw),
+        y: 120 + rng() * (h - 240 - bh),
         w: bw,
         h: bh,
-      });
+      };
+      if (!fits(r, GAP)) continue;
+      obstacles.push(r);
+      placed++;
     }
   } else if (config.terrain === "pillars") {
     const step = 260;
