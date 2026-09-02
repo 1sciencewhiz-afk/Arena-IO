@@ -215,6 +215,8 @@ function RoomPage() {
   const isAdminRef = useRef(false);
   const hostRef = useRef(false);
   const botStateRef = useRef<Map<string, { lastFire: number; respawnAt: number; aim: number }>>(new Map());
+  const camRef = useRef({ x: 0, y: 0 });
+  const takenRef = useRef<Map<string, number>>(new Map());
 
   // Track admin status in a ref for the game loop
   useEffect(() => { isAdminRef.current = isAdmin; }, [isAdmin]);
