@@ -755,7 +755,12 @@ function RoomPage() {
           else if (now >= st.respawnAt) {
             st.respawnAt = 0;
             bot.hp = bot.maxHp;
-            const bsp = safeSpawn(world);
+            // Rejoin the squad: drop next to a living team-mate when there is one
+            const mate = BOT_DEFS.map((d) => playersRef.current.get(d.id))
+              .find((b) => b && b.id !== bot.id && b.hp > 0);
+            const bsp = mate
+              ? resolveCircle(world.obstacles, mate.x + 60, mate.y + 40, PLAYER_R)
+              : safeSpawn(world);
             bot.x = bsp.x; bot.y = bsp.y;
           }
           continue;
