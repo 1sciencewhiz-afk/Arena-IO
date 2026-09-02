@@ -3,6 +3,14 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { subscribeLobby, type LobbyRoom } from "@/lib/arena/lobby";
+import {
+  DEFAULT_CONFIG,
+  MAP_SIZES,
+  TERRAINS,
+  encodeConfig,
+  type MapSizeId,
+  type RoomConfig,
+} from "@/lib/arena/world";
 import { useAuthUser, useProfile, signOut, useIsAdmin } from "@/lib/arena/auth";
 import { useLoadout } from "@/lib/arena/loadout";
 import { Armory } from "@/components/arena/Armory";
@@ -34,6 +42,7 @@ function Index() {
   const [code, setCode] = useState("");
   const [roomName, setRoomName] = useState("");
   const [rooms, setRooms] = useState<LobbyRoom[]>([]);
+  const [cfg, setCfg] = useState<RoomConfig>(DEFAULT_CONFIG);
   useEffect(() => subscribeLobby(setRooms), []);
 
   // Hydrate name on client to avoid SSR mismatch
@@ -52,7 +61,7 @@ function Index() {
   const isGuest = !userId;
   const displayName = profile?.username ?? (name.trim() || "Guest");
 
-  const go = (roomCode: string, customName?: string) => {
+  const go = (roomCode: string, customName?: string, cfg?: RoomConfig) => {
     const trimmed = name.trim() || `Player${Math.floor(Math.random() * 999)}`;
     try { localStorage.setItem("arena.name", trimmed); } catch { /* ignore */ }
     const upper = roomCode.toUpperCase();
@@ -62,6 +71,9 @@ function Index() {
         : (customName ?? roomName).trim() || `${trimmed}'s Arena`;
     try {
       sessionStorage.setItem(`arena.roomName.${upper}`, finalName);
+      if (cfg && upper !== PUBLIC_ROOM_CODE) {
+        sessionStorage.setItem(`arena.roomConfig.${upper}`, encodeConfig(cfg));
+      }
     } catch { /* ignore */ }
     navigate({ to: "/room/$code", params: { code: upper } });
   };
@@ -170,8 +182,78 @@ function Index() {
               />
             </div>
 
-            <Button onClick={() => go(randomCode())} className="h-12 w-full text-base font-bold">
-              Create new room
+            {/* Private room customisation */}
+            <div className="space-y-3 rounded-xl border border-foreground/10 bg-background/40 p-3">
+              <div className="text-xs uppercase tracking-wider text-foreground/60">Room settings</div>
+
+              <div className="space-y-1.5">
+                <div className="text-[11px] text-foreground/50">Terrain</div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {TERRAINS.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => setCfg({ ...cfg, terrain: t.id })}
+                      title={t.desc}
+                      className={`rounded-lg border px-2 py-1.5 text-xs font-semibold transition ${
+                        cfg.terrain === t.id
+                          ? "border-primary bg-primary/20 text-foreground"
+                          : "border-foreground/10 text-foreground/60 hover:border-foreground/30"
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="text-[11px] text-foreground/50">Map size</div>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {(Object.keys(MAP_SIZES) as MapSizeId[]).map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setCfg({ ...cfg, size: s })}
+                      className={`rounded-lg border px-1 py-1.5 text-[11px] font-semibold transition ${
+                        cfg.size === s
+                          ? "border-primary bg-primary/20 text-foreground"
+                          : "border-foreground/10 text-foreground/60 hover:border-foreground/30"
+                      }`}
+                    >
+                      {MAP_SIZES[s].label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCfg({ ...cfg, bots: !cfg.bots })}
+                  className={`flex-1 rounded-lg border px-2 py-1.5 text-xs font-semibold transition ${
+                    cfg.bots ? "border-primary bg-primary/20" : "border-foreground/10 text-foreground/50"
+                  }`}
+                >
+                  Bot squad {cfg.bots ? "ON" : "OFF"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCfg({ ...cfg, pickups: !cfg.pickups })}
+                  className={`flex-1 rounded-lg border px-2 py-1.5 text-xs font-semibold transition ${
+                    cfg.pickups ? "border-primary bg-primary/20" : "border-foreground/10 text-foreground/50"
+                  }`}
+                >
+                  Pickups {cfg.pickups ? "ON" : "OFF"}
+                </button>
+              </div>
+            </div>
+
+            <Button
+              onClick={() => go(randomCode(), undefined, cfg)}
+              className="h-12 w-full text-base font-bold"
+            >
+              Create private room
             </Button>
 
             <div className="flex items-center gap-3 text-xs text-foreground/40">

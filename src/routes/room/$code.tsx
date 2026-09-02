@@ -27,6 +27,8 @@ import {
   decodeConfig,
   resolveCircle,
   safeSpawn,
+  circleHitsObstacle,
+  groupSpawn,
   randomLootWeapon,
   MEDKIT_HEAL,
   PICKUP_R,
@@ -137,6 +139,7 @@ function RoomPage() {
   const [showHelp, setShowHelp] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showScoreboard, setShowScoreboard] = useState(false);
+  const [lootMsg, setLootMsg] = useState<string | null>(null);
   // Hydrate room name client-side to avoid SSR mismatch
   const [roomName, setRoomName] = useState<string>(code);
   const [config, setConfig] = useState<RoomConfig>(code === "PUBLIC" ? PUBLIC_CONFIG : DEFAULT_CONFIG);
@@ -390,7 +393,7 @@ function RoomPage() {
         // Lowest id present hosts the bot squad
         const sorted = Array.from(presentIds).sort();
         hostRef.current = sorted.length > 0 && sorted[0] === me.id;
-        if (hostRef.current) ensureBots();
+        if (hostRef.current && config.bots) ensureBots();
         else for (const b of BOT_DEFS) botStateRef.current.delete(b.id);
         for (const id of presentIds) {
           if (!playersRef.current.has(id)) {
@@ -418,7 +421,7 @@ function RoomPage() {
           kills: number; color: string; upgrades: Upgrades; aim?: number;
         };
         if (!p || typeof p.id !== "string") return;
-        const safeMaxHp = clampNum(p.maxHp, 1, 1000, 100);
+        const safeMaxHp = clampNum(p.maxHp, 1, 99999, 100);
         const safeHp = clampNum(p.hp, 0, safeMaxHp, safeMaxHp);
         const safeKills = clampNum(p.kills, 0, 100000, 0);
         const rawU = (p.upgrades ?? ZERO_UPGRADES) as Upgrades;
@@ -491,6 +494,11 @@ function RoomPage() {
         const safeImmo = Math.max(0, Math.min(Number(immobilize) || 0, 3000));
         applyDamage(target, by, safeDmg, weapon, safeImmo || undefined);
       })
+      .on("broadcast", { event: "taken" }, ({ payload }) => {
+        const id = (payload as { id?: string })?.id;
+        if (typeof id !== "string") return;
+        takenRef.current.set(id, performance.now() + PICKUP_RESPAWN_MS);
+      })
       .subscribe(async (status) => {
         if (status === "SUBSCRIBED") {
           setConnected(true);
@@ -498,11 +506,11 @@ function RoomPage() {
         }
       });
 
-    const stopAnnounce = announceRoom({
-      roomCode: code,
-      roomName,
-      playerName: me.name,
-    });
+    // Only the public arena is advertised in the lobby — private rooms stay hidden
+    const stopAnnounce =
+      code === "PUBLIC"
+        ? announceRoom({ roomCode: code, roomName, playerName: me.name })
+        : () => {};
 
     const onKeyDown = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
@@ -653,11 +661,13 @@ function RoomPage() {
       other.hp > 0 && other.id !== ownerId && !(isBot(ownerId) && isBot(other.id));
 
     function ensureBots() {
-      for (const def of BOT_DEFS) {
+      // The squad drops in together, clustered around one safe location
+      const spots = groupSpawn(world, BOT_DEFS.length);
+      BOT_DEFS.forEach((def, i) => {
         if (!playersRef.current.has(def.id)) {
           playersRef.current.set(def.id, {
             id: def.id, name: def.name,
-            ...safeSpawn(world),
+            ...spots[i],
             color: def.color, hp: def.hp, maxHp: def.hp, kills: 0,
             upgrades: { ...ZERO_UPGRADES }, aim: 0, immobilizedUntil: 0,
           });
@@ -665,7 +675,7 @@ function RoomPage() {
         if (!botStateRef.current.has(def.id)) {
           botStateRef.current.set(def.id, { lastFire: 0, respawnAt: 0, aim: 0 });
         }
-      }
+      });
     }
 
     /** Spawn a bullet owned by a bot (or a summoned unit) and tell everyone. */
@@ -753,7 +763,12 @@ function RoomPage() {
           else if (now >= st.respawnAt) {
             st.respawnAt = 0;
             bot.hp = bot.maxHp;
-            const bsp = safeSpawn(world);
+            // Rejoin the squad: drop next to a living team-mate when there is one
+            const mate = BOT_DEFS.map((d) => playersRef.current.get(d.id))
+              .find((b) => b && b.id !== bot.id && b.hp > 0);
+            const bsp = mate
+              ? resolveCircle(world.obstacles, mate.x + 60, mate.y + 40, PLAYER_R)
+              : safeSpawn(world);
             bot.x = bsp.x; bot.y = bsp.y;
           }
           continue;
@@ -971,6 +986,60 @@ function RoomPage() {
       return rest as Projectile;
     }
 
+    /** Projectiles are stopped by terrain, and opposing shots cancel each other out. */
+    function resolveProjectileWorld(now: number) {
+      const dead = new Set<string>();
+      const list = projectilesRef.current;
+
+      // 1. Terrain — only the owner resolves, then tells everyone
+      for (const b of list) {
+        if (!isMine(b.owner)) continue;
+        if (b.weapon === "mine" || WEAPONS[b.weapon]?.summon || b.radius <= 0) continue;
+        if (!circleHitsObstacle(world.obstacles, b.x, b.y, b.radius)) continue;
+        if (b.bouncesLeft && b.bouncesLeft > 0) {
+          const hx = circleHitsObstacle(world.obstacles, b.x + Math.sign(b.vx) * (b.radius + 2), b.y, b.radius);
+          if (hx) b.vx = -b.vx; else b.vy = -b.vy;
+          const fix = resolveCircle(world.obstacles, b.x, b.y, b.radius + 1);
+          b.x = fix.x; b.y = fix.y;
+          b.bouncesLeft -= 1;
+          continue;
+        }
+        if (b.splash) explode(b);
+        dead.add(b.id);
+      }
+
+      // 2. Ranged shots neutralise on contact
+      const cancellable = (p: Projectile) =>
+        !dead.has(p.id) && p.radius > 0 && p.weapon !== "mine" &&
+        !WEAPONS[p.weapon]?.summon && !WEAPONS[p.weapon]?.placeable &&
+        (p.vx !== 0 || p.vy !== 0);
+
+      for (let i = 0; i < list.length; i++) {
+        const a = list[i];
+        if (!cancellable(a)) continue;
+        for (let j = i + 1; j < list.length; j++) {
+          const b = list[j];
+          if (!cancellable(b)) continue;
+          if (a.owner === b.owner) continue;
+          if (isBot(a.owner) && isBot(b.owner)) continue;
+          if (Math.hypot(a.x - b.x, a.y - b.y) > a.radius + b.radius + 4) continue;
+          for (const p of [a, b]) {
+            if (isMine(p.owner) && p.splash) explode(p);
+            dead.add(p.id);
+          }
+          boomsRef.current.push({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, r: 14, born: now, color: "#ffffff" });
+          break;
+        }
+      }
+
+      if (dead.size === 0) return;
+      const mineDead = list.filter((p) => dead.has(p.id) && isMine(p.owner)).map((p) => p.id);
+      projectilesRef.current = list.filter((p) => !dead.has(p.id));
+      if (mineDead.length) {
+        channelRef.current?.send({ type: "broadcast", event: "despawn", payload: { ids: mineDead } });
+      }
+    }
+
     const ctx = canvas.getContext("2d")!;
     let raf = 0;
     let last = performance.now();
@@ -1015,7 +1084,35 @@ function RoomPage() {
         tryFire(now);
       }
 
-      if (hostRef.current) botTick(now, dt);
+      if (hostRef.current && config.bots) botTick(now, dt);
+
+      // Pickups: medkits heal, lootboxes grant a random weapon into the hotbar
+      if (self && self.hp > 0 && config.pickups) {
+        for (const p of world.pickups) {
+          if ((takenRef.current.get(p.id) ?? 0) > now) continue;
+          if (Math.hypot(self.x - p.x, self.y - p.y) > PICKUP_R + PLAYER_R) continue;
+          takenRef.current.set(p.id, now + PICKUP_RESPAWN_MS);
+          channelRef.current?.send({ type: "broadcast", event: "taken", payload: { id: p.id } });
+          if (p.kind === "medkit") {
+            if (self.hp >= self.maxHp) { takenRef.current.delete(p.id); continue; }
+            self.hp = Math.min(self.maxHp, self.hp + MEDKIT_HEAL);
+            setHpUi({ hp: self.hp, max: self.maxHp });
+          } else {
+            const w = randomLootWeapon();
+            weaponRef.current = w;
+            chargeStartRef.current = null;
+            setWeaponUi(w);
+            if (!hotbarRef.current.includes(w)) {
+              hotbarRef.current = [w, ...hotbarRef.current].slice(0, 4);
+            }
+            setLootMsg(`Picked up ${WEAPONS[w].name}!`);
+            window.setTimeout(() => setLootMsg(null), 1800);
+          }
+        }
+      }
+
+      // Projectile vs terrain, and ranged shots neutralising each other
+      resolveProjectileWorld(now);
 
       // Update projectiles + collision
       const alive: Projectile[] = [];
@@ -1431,7 +1528,12 @@ function RoomPage() {
 
         <div className={isTouch ? "flex min-h-0 flex-1" : "grid gap-4 lg:grid-cols-[1fr_260px]"}>
           <div className={isTouch ? "flex min-h-0 flex-1 items-center justify-center" : "space-y-3"}>
-            <div className={`overflow-hidden ${isTouch ? "h-full w-full" : "rounded-xl border border-foreground/10 bg-black shadow-2xl"}`}>
+            <div className={`relative overflow-hidden ${isTouch ? "h-full w-full" : "rounded-xl border border-foreground/10 bg-black shadow-2xl"}`}>
+              {lootMsg && (
+                <div className="pointer-events-none absolute left-1/2 top-4 z-20 -translate-x-1/2 rounded-lg bg-primary/90 px-3 py-1.5 text-xs font-bold text-primary-foreground shadow-lg">
+                  {lootMsg}
+                </div>
+              )}
               <canvas
                 ref={canvasRef}
                 width={VIEW_W}

@@ -92,17 +92,32 @@ export function buildWorld(code: string, config: RoomConfig): World {
 
   const area = (w * h) / 1_000_000; // in "million px" units
 
+  /** Reject a rect that comes within `gap` px of an existing one. */
+  const fits = (r: Obstacle, gap: number) =>
+    !obstacles.some(
+      (o) =>
+        r.x < o.x + o.w + gap &&
+        r.x + r.w + gap > o.x &&
+        r.y < o.y + o.h + gap &&
+        r.y + r.h + gap > o.y,
+    );
+
   if (config.terrain === "blocks") {
-    const count = Math.round(28 * area) + 8;
-    for (let i = 0; i < count; i++) {
-      const bw = 60 + rng() * 180;
-      const bh = 60 + rng() * 180;
-      obstacles.push({
-        x: 80 + rng() * (w - 160 - bw),
-        y: 80 + rng() * (h - 160 - bh),
+    const target = Math.round(26 * area) + 8;
+    const GAP = 140; // wide lanes between cover so fights have space
+    let placed = 0;
+    for (let i = 0; i < target * 60 && placed < target; i++) {
+      const bw = 70 + rng() * 150;
+      const bh = 70 + rng() * 150;
+      const r: Obstacle = {
+        x: 120 + rng() * (w - 240 - bw),
+        y: 120 + rng() * (h - 240 - bh),
         w: bw,
         h: bh,
-      });
+      };
+      if (!fits(r, GAP)) continue;
+      obstacles.push(r);
+      placed++;
     }
   } else if (config.terrain === "pillars") {
     const step = 260;
@@ -129,11 +144,19 @@ export function buildWorld(code: string, config: RoomConfig): World {
   if (config.pickups) {
     const medkits = Math.round(10 * area) + 4;
     const boxes = Math.round(8 * area) + 3;
+    const freeSpot = () => {
+      for (let t = 0; t < 40; t++) {
+        const x = 60 + rng() * (w - 120);
+        const y = 60 + rng() * (h - 120);
+        if (!pointInObstacles(obstacles, x, y, 30)) return { x, y };
+      }
+      return { x: 60 + rng() * (w - 120), y: 60 + rng() * (h - 120) };
+    };
     for (let i = 0; i < medkits; i++) {
-      pickups.push({ id: `m${i}`, kind: "medkit", x: 60 + rng() * (w - 120), y: 60 + rng() * (h - 120) });
+      pickups.push({ id: `m${i}`, kind: "medkit", ...freeSpot() });
     }
     for (let i = 0; i < boxes; i++) {
-      pickups.push({ id: `l${i}`, kind: "lootbox", x: 60 + rng() * (w - 120), y: 60 + rng() * (h - 120) });
+      pickups.push({ id: `l${i}`, kind: "lootbox", ...freeSpot() });
     }
   }
 
@@ -197,4 +220,33 @@ export function safeSpawn(world: World, rng: () => number = Math.random) {
     if (!pointInObstacles(world.obstacles, x, y, 24)) return { x, y };
   }
   return { x: world.w / 2, y: world.h / 2 };
+}
+
+/** True when a circle (e.g. a projectile) overlaps any obstacle. */
+export function circleHitsObstacle(obstacles: Obstacle[], x: number, y: number, r: number) {
+  for (const o of obstacles) {
+    const cx = Math.max(o.x, Math.min(x, o.x + o.w));
+    const cy = Math.max(o.y, Math.min(y, o.y + o.h));
+    const dx = x - cx;
+    const dy = y - cy;
+    if (dx * dx + dy * dy < r * r) return true;
+  }
+  return false;
+}
+
+/** A cluster of spawn points around one safe location — used for the bot squad. */
+export function groupSpawn(world: World, count: number, rng: () => number = Math.random) {
+  const centre = safeSpawn(world, rng);
+  const out: { x: number; y: number }[] = [];
+  for (let i = 0; i < count; i++) {
+    const ang = (i / Math.max(1, count)) * Math.PI * 2;
+    const rad = 70;
+    let x = centre.x + Math.cos(ang) * rad;
+    let y = centre.y + Math.sin(ang) * rad;
+    x = Math.max(40, Math.min(world.w - 40, x));
+    y = Math.max(40, Math.min(world.h - 40, y));
+    const fix = resolveCircle(world.obstacles, x, y, 18);
+    out.push(fix);
+  }
+  return out;
 }
