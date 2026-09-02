@@ -390,7 +390,7 @@ function RoomPage() {
         // Lowest id present hosts the bot squad
         const sorted = Array.from(presentIds).sort();
         hostRef.current = sorted.length > 0 && sorted[0] === me.id;
-        if (hostRef.current) ensureBots();
+        if (hostRef.current && config.bots) ensureBots();
         else for (const b of BOT_DEFS) botStateRef.current.delete(b.id);
         for (const id of presentIds) {
           if (!playersRef.current.has(id)) {
