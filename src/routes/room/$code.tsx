@@ -302,6 +302,7 @@ function RoomPage() {
   }, []);
 
   useEffect(() => {
+    const cam = camRef.current;
     const me: Player = {
       id: meRef.current.id,
       name: meRef.current.name,
