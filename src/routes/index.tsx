@@ -52,7 +52,7 @@ function Index() {
   const isGuest = !userId;
   const displayName = profile?.username ?? (name.trim() || "Guest");
 
-  const go = (roomCode: string, customName?: string) => {
+  const go = (roomCode: string, customName?: string, cfg?: RoomConfig) => {
     const trimmed = name.trim() || `Player${Math.floor(Math.random() * 999)}`;
     try { localStorage.setItem("arena.name", trimmed); } catch { /* ignore */ }
     const upper = roomCode.toUpperCase();
@@ -62,6 +62,9 @@ function Index() {
         : (customName ?? roomName).trim() || `${trimmed}'s Arena`;
     try {
       sessionStorage.setItem(`arena.roomName.${upper}`, finalName);
+      if (cfg && upper !== PUBLIC_ROOM_CODE) {
+        sessionStorage.setItem(`arena.roomConfig.${upper}`, encodeConfig(cfg));
+      }
     } catch { /* ignore */ }
     navigate({ to: "/room/$code", params: { code: upper } });
   };
