@@ -144,11 +144,19 @@ export function buildWorld(code: string, config: RoomConfig): World {
   if (config.pickups) {
     const medkits = Math.round(10 * area) + 4;
     const boxes = Math.round(8 * area) + 3;
+    const freeSpot = () => {
+      for (let t = 0; t < 40; t++) {
+        const x = 60 + rng() * (w - 120);
+        const y = 60 + rng() * (h - 120);
+        if (!pointInObstacles(obstacles, x, y, 30)) return { x, y };
+      }
+      return { x: 60 + rng() * (w - 120), y: 60 + rng() * (h - 120) };
+    };
     for (let i = 0; i < medkits; i++) {
-      pickups.push({ id: `m${i}`, kind: "medkit", x: 60 + rng() * (w - 120), y: 60 + rng() * (h - 120) });
+      pickups.push({ id: `m${i}`, kind: "medkit", ...freeSpot() });
     }
     for (let i = 0; i < boxes; i++) {
-      pickups.push({ id: `l${i}`, kind: "lootbox", x: 60 + rng() * (w - 120), y: 60 + rng() * (h - 120) });
+      pickups.push({ id: `l${i}`, kind: "lootbox", ...freeSpot() });
     }
   }
 
