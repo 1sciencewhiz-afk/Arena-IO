@@ -27,6 +27,8 @@ import {
   decodeConfig,
   resolveCircle,
   safeSpawn,
+  circleHitsObstacle,
+  groupSpawn,
   randomLootWeapon,
   MEDKIT_HEAL,
   PICKUP_R,
