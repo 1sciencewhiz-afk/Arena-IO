@@ -667,7 +667,7 @@ function RoomPage() {
         if (!botStateRef.current.has(def.id)) {
           botStateRef.current.set(def.id, { lastFire: 0, respawnAt: 0, aim: 0 });
         }
-      }
+      });
     }
 
     /** Spawn a bullet owned by a bot (or a summoned unit) and tell everyone. */
