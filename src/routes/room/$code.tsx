@@ -215,6 +215,8 @@ function RoomPage() {
   const isAdminRef = useRef(false);
   const hostRef = useRef(false);
   const botStateRef = useRef<Map<string, { lastFire: number; respawnAt: number; aim: number }>>(new Map());
+  const camRef = useRef({ x: 0, y: 0 });
+  const takenRef = useRef<Map<string, number>>(new Map());
 
   // Track admin status in a ref for the game loop
   useEffect(() => { isAdminRef.current = isAdmin; }, [isAdmin]);
@@ -300,6 +302,7 @@ function RoomPage() {
   }, []);
 
   useEffect(() => {
+    const cam = camRef.current;
     const me: Player = {
       id: meRef.current.id,
       name: meRef.current.name,
@@ -1211,7 +1214,7 @@ function RoomPage() {
 
       // Pickups
       for (const p of world.pickups) {
-        if (takenRef.current.get(p.id) ?? 0 > now) continue;
+        
         if ((takenRef.current.get(p.id) ?? 0) > now) continue;
         if (p.x > cam.x + VIEW_W + 40 || p.x < cam.x - 40 || p.y > cam.y + VIEW_H + 40 || p.y < cam.y - 40) continue;
         const bob = Math.sin(now / 400 + p.x) * 2;
