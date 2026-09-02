@@ -221,3 +221,32 @@ export function safeSpawn(world: World, rng: () => number = Math.random) {
   }
   return { x: world.w / 2, y: world.h / 2 };
 }
+
+/** True when a circle (e.g. a projectile) overlaps any obstacle. */
+export function circleHitsObstacle(obstacles: Obstacle[], x: number, y: number, r: number) {
+  for (const o of obstacles) {
+    const cx = Math.max(o.x, Math.min(x, o.x + o.w));
+    const cy = Math.max(o.y, Math.min(y, o.y + o.h));
+    const dx = x - cx;
+    const dy = y - cy;
+    if (dx * dx + dy * dy < r * r) return true;
+  }
+  return false;
+}
+
+/** A cluster of spawn points around one safe location — used for the bot squad. */
+export function groupSpawn(world: World, count: number, rng: () => number = Math.random) {
+  const centre = safeSpawn(world, rng);
+  const out: { x: number; y: number }[] = [];
+  for (let i = 0; i < count; i++) {
+    const ang = (i / Math.max(1, count)) * Math.PI * 2;
+    const rad = 70;
+    let x = centre.x + Math.cos(ang) * rad;
+    let y = centre.y + Math.sin(ang) * rad;
+    x = Math.max(40, Math.min(world.w - 40, x));
+    y = Math.max(40, Math.min(world.h - 40, y));
+    const fix = resolveCircle(world.obstacles, x, y, 18);
+    out.push(fix);
+  }
+  return out;
+}
