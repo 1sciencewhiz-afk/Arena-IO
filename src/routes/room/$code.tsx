@@ -1528,7 +1528,12 @@ function RoomPage() {
 
         <div className={isTouch ? "flex min-h-0 flex-1" : "grid gap-4 lg:grid-cols-[1fr_260px]"}>
           <div className={isTouch ? "flex min-h-0 flex-1 items-center justify-center" : "space-y-3"}>
-            <div className={`overflow-hidden ${isTouch ? "h-full w-full" : "rounded-xl border border-foreground/10 bg-black shadow-2xl"}`}>
+            <div className={`relative overflow-hidden ${isTouch ? "h-full w-full" : "rounded-xl border border-foreground/10 bg-black shadow-2xl"}`}>
+              {lootMsg && (
+                <div className="pointer-events-none absolute left-1/2 top-4 z-20 -translate-x-1/2 rounded-lg bg-primary/90 px-3 py-1.5 text-xs font-bold text-primary-foreground shadow-lg">
+                  {lootMsg}
+                </div>
+              )}
               <canvas
                 ref={canvasRef}
                 width={VIEW_W}
