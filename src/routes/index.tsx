@@ -182,8 +182,78 @@ function Index() {
               />
             </div>
 
-            <Button onClick={() => go(randomCode())} className="h-12 w-full text-base font-bold">
-              Create new room
+            {/* Private room customisation */}
+            <div className="space-y-3 rounded-xl border border-foreground/10 bg-background/40 p-3">
+              <div className="text-xs uppercase tracking-wider text-foreground/60">Room settings</div>
+
+              <div className="space-y-1.5">
+                <div className="text-[11px] text-foreground/50">Terrain</div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {TERRAINS.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => setCfg({ ...cfg, terrain: t.id })}
+                      title={t.desc}
+                      className={`rounded-lg border px-2 py-1.5 text-xs font-semibold transition ${
+                        cfg.terrain === t.id
+                          ? "border-primary bg-primary/20 text-foreground"
+                          : "border-foreground/10 text-foreground/60 hover:border-foreground/30"
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="text-[11px] text-foreground/50">Map size</div>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {(Object.keys(MAP_SIZES) as MapSizeId[]).map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setCfg({ ...cfg, size: s })}
+                      className={`rounded-lg border px-1 py-1.5 text-[11px] font-semibold transition ${
+                        cfg.size === s
+                          ? "border-primary bg-primary/20 text-foreground"
+                          : "border-foreground/10 text-foreground/60 hover:border-foreground/30"
+                      }`}
+                    >
+                      {MAP_SIZES[s].label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCfg({ ...cfg, bots: !cfg.bots })}
+                  className={`flex-1 rounded-lg border px-2 py-1.5 text-xs font-semibold transition ${
+                    cfg.bots ? "border-primary bg-primary/20" : "border-foreground/10 text-foreground/50"
+                  }`}
+                >
+                  Bot squad {cfg.bots ? "ON" : "OFF"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCfg({ ...cfg, pickups: !cfg.pickups })}
+                  className={`flex-1 rounded-lg border px-2 py-1.5 text-xs font-semibold transition ${
+                    cfg.pickups ? "border-primary bg-primary/20" : "border-foreground/10 text-foreground/50"
+                  }`}
+                >
+                  Pickups {cfg.pickups ? "ON" : "OFF"}
+                </button>
+              </div>
+            </div>
+
+            <Button
+              onClick={() => go(randomCode(), undefined, cfg)}
+              className="h-12 w-full text-base font-bold"
+            >
+              Create private room
             </Button>
 
             <div className="flex items-center gap-3 text-xs text-foreground/40">
