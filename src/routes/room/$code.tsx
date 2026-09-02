@@ -1214,7 +1214,7 @@ function RoomPage() {
 
       // Pickups
       for (const p of world.pickups) {
-        if (takenRef.current.get(p.id) ?? 0 > now) continue;
+        
         if ((takenRef.current.get(p.id) ?? 0) > now) continue;
         if (p.x > cam.x + VIEW_W + 40 || p.x < cam.x - 40 || p.y > cam.y + VIEW_H + 40 || p.y < cam.y - 40) continue;
         const bob = Math.sin(now / 400 + p.x) * 2;
