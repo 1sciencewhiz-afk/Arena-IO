@@ -218,7 +218,9 @@ function RoomPage() {
   const hotbarRef = useRef<WeaponId[]>(["pistol"]);
   const isAdminRef = useRef(false);
   const hostRef = useRef(false);
-  const botStateRef = useRef<Map<string, { lastFire: number; respawnAt: number; aim: number }>>(new Map());
+  const botStateRef = useRef<
+    Map<string, { lastFire: number; respawnAt: number; aim: number; slot: number; strikeAt: number; striking: boolean }>
+  >(new Map());
   const camRef = useRef({ x: 0, y: 0 });
   const takenRef = useRef<Map<string, number>>(new Map());
 
@@ -674,7 +676,9 @@ function RoomPage() {
           });
         }
         if (!botStateRef.current.has(def.id)) {
-          botStateRef.current.set(def.id, { lastFire: 0, respawnAt: 0, aim: 0 });
+          botStateRef.current.set(def.id, {
+            lastFire: 0, respawnAt: 0, aim: 0, slot: i, strikeAt: 0, striking: false,
+          });
         }
       });
     }
@@ -712,7 +716,53 @@ function RoomPage() {
       return best;
     }
 
+    /** True when nothing solid sits between two points. */
+    function losClear(x1: number, y1: number, x2: number, y2: number, r = 6) {
+      const d = Math.hypot(x2 - x1, y2 - y1);
+      const steps = Math.max(2, Math.ceil(d / 26));
+      for (let i = 1; i < steps; i++) {
+        const t = i / steps;
+        if (circleHitsObstacle(world.obstacles, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t, r)) return false;
+      }
+      return true;
+    }
+
+    /**
+     * Greedy "pathfinding": probe fanned-out headings and keep the one that is
+     * both clear for a few body-lengths and closest to the desired direction.
+     */
+    function steerAround(x: number, y: number, desired: number, r: number, probe = 90) {
+      const offsets = [0, 0.4, -0.4, 0.8, -0.8, 1.2, -1.2, 1.7, -1.7, 2.2, -2.2, 2.8, -2.8, Math.PI];
+      for (const o of offsets) {
+        const a = desired + o;
+        if (losClear(x, y, x + Math.cos(a) * probe, y + Math.sin(a) * probe, r)) return a;
+      }
+      return desired;
+    }
+
+    /** Perpendicular escape direction from the nearest incoming enemy shot, if any. */
+    function dodgeVec(bot: Player, lookahead = 260) {
+      for (const b of projectilesRef.current) {
+        if (b.owner === bot.id || isBot(b.owner)) continue;
+        if (b.radius <= 0) continue;
+        const sp = Math.hypot(b.vx, b.vy);
+        if (sp < 20) continue;
+        const dx = bot.x - b.x;
+        const dy = bot.y - b.y;
+        const along = (dx * b.vx + dy * b.vy) / sp;
+        if (along < 0 || along > lookahead) continue;
+        const px = -b.vy / sp;
+        const py = b.vx / sp;
+        const lateral = dx * px + dy * py;
+        if (Math.abs(lateral) > PLAYER_R + b.radius + 26) continue;
+        const side = lateral >= 0 ? 1 : -1;
+        return Math.atan2(py * side, px * side);
+      }
+      return null;
+    }
+
     /** Summoned units (Army / Mini Soldiers) shoot their pistols. */
+
     function unitFire(b: Projectile, now: number) {
       const w = WEAPONS[b.weapon];
       if (!w.summon) return;
@@ -780,26 +830,55 @@ function RoomPage() {
         const dy = focus.y - bot.y;
         const dist = Math.hypot(dx, dy) || 1;
         bot.aim = Math.atan2(dy, dx);
+        const seen = losClear(bot.x, bot.y, focus.x, focus.y);
 
-        // Keep preferred spacing; melee always closes in
-        let moveDir = 0;
-        if (dist > def.keep + 40) moveDir = 1;
-        else if (dist < def.keep - 40) moveDir = -1;
-        if (moveDir !== 0) {
-          const strafe = Math.sin(now / 700 + def.id.length) * 0.5;
-          const ang = Math.atan2(dy, dx) + strafe * 0.6;
-          bot.x += Math.cos(ang) * moveDir * def.speed * dt;
-          bot.y += Math.sin(ang) * moveDir * def.speed * dt;
+        // Ambush cycle: creep into a surround slot out of sight, then strike together
+        if (st.strikeAt === 0) st.strikeAt = now + 4500;
+        if (now >= st.strikeAt) {
+          st.striking = !st.striking;
+          st.strikeAt = now + (st.striking ? 6500 : 5000);
+        }
+
+        const AMBUSH_R = 640; // just outside the player's view
+        const ring = st.striking ? Math.max(def.keep, 70) : Math.max(def.keep, AMBUSH_R);
+        const slotAng = (st.slot / BOT_DEFS.length) * Math.PI * 2 + now / 6000;
+        const goalX = Math.max(40, Math.min(world.w - 40, focus.x + Math.cos(slotAng) * ring));
+        const goalY = Math.max(40, Math.min(world.h - 40, focus.y + Math.sin(slotAng) * ring));
+
+        let desired = Math.atan2(goalY - bot.y, goalX - bot.x);
+        const goalD = Math.hypot(goalX - bot.x, goalY - bot.y);
+
+        // Sentry body-blocks: it slides into the firing line in front of the squad
+        if (def.id === "bot:ranged" && st.striking) {
+          desired = Math.atan2(dy, dx);
+        }
+
+        // Everyone but the Sentry sidesteps incoming fire
+        let speedMul = 1;
+        if (def.id !== "bot:ranged") {
+          const dodge = dodgeVec(bot);
+          if (dodge != null) { desired = dodge; speedMul = 1.25; }
+        }
+
+        if (goalD > 26 || speedMul > 1) {
+          const ang = steerAround(bot.x, bot.y, desired, PLAYER_R, Math.min(110, goalD + 30));
+          const sp = def.speed * (st.striking ? 1.15 : 0.85) * speedMul;
+          bot.x += Math.cos(ang) * sp * dt;
+          bot.y += Math.sin(ang) * sp * dt;
           bot.x = Math.max(PLAYER_R, Math.min(world.w - PLAYER_R, bot.x));
           bot.y = Math.max(PLAYER_R, Math.min(world.h - PLAYER_R, bot.y));
           const bfix = resolveCircle(world.obstacles, bot.x, bot.y, PLAYER_R);
           bot.x = bfix.x; bot.y = bfix.y;
         }
 
+
         const w = WEAPONS[def.weapon];
         if (now - st.lastFire < w.cooldown * 1000) continue;
         if (dist > def.range) continue;
+        if (!w.melee && !seen) continue;               // don't shoot through walls
+        if (!st.striking && dist > def.range * 0.6) continue; // stay hidden until the ambush
         st.lastFire = now;
+
 
         if (w.melee) {
           const swing: SwingFx = {
