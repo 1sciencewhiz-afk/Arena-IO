@@ -875,7 +875,10 @@ function RoomPage() {
         const w = WEAPONS[def.weapon];
         if (now - st.lastFire < w.cooldown * 1000) continue;
         if (dist > def.range) continue;
+        if (!w.melee && !seen) continue;               // don't shoot through walls
+        if (!st.striking && dist > def.range * 0.6) continue; // stay hidden until the ambush
         st.lastFire = now;
+
 
         if (w.melee) {
           const swing: SwingFx = {
