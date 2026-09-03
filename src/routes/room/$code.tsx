@@ -830,21 +830,47 @@ function RoomPage() {
         const dy = focus.y - bot.y;
         const dist = Math.hypot(dx, dy) || 1;
         bot.aim = Math.atan2(dy, dx);
+        const seen = losClear(bot.x, bot.y, focus.x, focus.y);
 
-        // Keep preferred spacing; melee always closes in
-        let moveDir = 0;
-        if (dist > def.keep + 40) moveDir = 1;
-        else if (dist < def.keep - 40) moveDir = -1;
-        if (moveDir !== 0) {
-          const strafe = Math.sin(now / 700 + def.id.length) * 0.5;
-          const ang = Math.atan2(dy, dx) + strafe * 0.6;
-          bot.x += Math.cos(ang) * moveDir * def.speed * dt;
-          bot.y += Math.sin(ang) * moveDir * def.speed * dt;
+        // Ambush cycle: creep into a surround slot out of sight, then strike together
+        if (st.strikeAt === 0) st.strikeAt = now + 4500;
+        if (now >= st.strikeAt) {
+          st.striking = !st.striking;
+          st.strikeAt = now + (st.striking ? 6500 : 5000);
+        }
+
+        const AMBUSH_R = 640; // just outside the player's view
+        const ring = st.striking ? Math.max(def.keep, 70) : Math.max(def.keep, AMBUSH_R);
+        const slotAng = (st.slot / BOT_DEFS.length) * Math.PI * 2 + now / 6000;
+        const goalX = Math.max(40, Math.min(world.w - 40, focus.x + Math.cos(slotAng) * ring));
+        const goalY = Math.max(40, Math.min(world.h - 40, focus.y + Math.sin(slotAng) * ring));
+
+        let desired = Math.atan2(goalY - bot.y, goalX - bot.x);
+        const goalD = Math.hypot(goalX - bot.x, goalY - bot.y);
+
+        // Sentry body-blocks: it slides into the firing line in front of the squad
+        if (def.id === "bot:ranged" && st.striking) {
+          desired = Math.atan2(dy, dx);
+        }
+
+        // Everyone but the Sentry sidesteps incoming fire
+        let speedMul = 1;
+        if (def.id !== "bot:ranged") {
+          const dodge = dodgeVec(bot);
+          if (dodge != null) { desired = dodge; speedMul = 1.25; }
+        }
+
+        if (goalD > 26 || speedMul > 1) {
+          const ang = steerAround(bot.x, bot.y, desired, PLAYER_R, Math.min(110, goalD + 30));
+          const sp = def.speed * (st.striking ? 1.15 : 0.85) * speedMul;
+          bot.x += Math.cos(ang) * sp * dt;
+          bot.y += Math.sin(ang) * sp * dt;
           bot.x = Math.max(PLAYER_R, Math.min(world.w - PLAYER_R, bot.x));
           bot.y = Math.max(PLAYER_R, Math.min(world.h - PLAYER_R, bot.y));
           const bfix = resolveCircle(world.obstacles, bot.x, bot.y, PLAYER_R);
           bot.x = bfix.x; bot.y = bfix.y;
         }
+
 
         const w = WEAPONS[def.weapon];
         if (now - st.lastFire < w.cooldown * 1000) continue;
