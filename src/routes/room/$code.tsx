@@ -1471,8 +1471,9 @@ function RoomPage() {
 
   const shareUrl = useMemo(() => {
     if (typeof window === "undefined") return "";
-    return `${window.location.origin}/room/${code}`;
-  }, [code]);
+    if (code === "PUBLIC") return `${window.location.origin}/room/${code}`;
+    return `${window.location.origin}/room/${code}?c=${encodeConfig(config)}`;
+  }, [code, config]);
 
   const hotbar = loadout.hotbar;
   void startKillPointsRef; // referenced for future use
