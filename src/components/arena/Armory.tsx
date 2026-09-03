@@ -240,7 +240,7 @@ export function Armory({ loadout, update, isGuest }: Props) {
       {loadout.storage.length > 0 && (
         <div className="rounded-xl border border-foreground/10 bg-foreground/5 p-4">
           <h3 className="mb-2 text-xs uppercase tracking-wider text-foreground/60">
-            Storage ({loadout.storage.length})
+            Storage ({loadout.storage.length}) · unlimited
           </h3>
           <p className="mb-2 text-[11px] text-foreground/50">
             Weapons not currently in your inventory. Move into inventory to equip.

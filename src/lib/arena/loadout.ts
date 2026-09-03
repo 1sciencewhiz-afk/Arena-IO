@@ -80,7 +80,7 @@ export function useLoadout(userId: string | null) {
   const update = async (patch: Partial<Loadout>) => {
     const next: Loadout = { ...loadout, ...patch };
     // Enforce invariants
-    next.inventory = next.inventory.slice(0, MAX_INVENTORY);
+    next.inventory = next.inventory.slice(0, MAX_INVENTORY); // storage is unlimited
     next.hotbar = next.hotbar.filter((w) => next.inventory.includes(w)).slice(0, MAX_HOTBAR);
     if (next.hotbar.length === 0 && next.inventory.length > 0) {
       next.hotbar = [next.inventory[0]];
