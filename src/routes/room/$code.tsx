@@ -751,10 +751,12 @@ function RoomPage() {
         const dy = bot.y - b.y;
         const along = (dx * b.vx + dy * b.vy) / sp;
         if (along < 0 || along > lookahead) continue;
-        const perpDist = Math.abs(dx * (-b.vy / sp) + dy * (b.vx / sp));
-        if (perpDist > PLAYER_R + b.radius + 26) continue;
-        const side = dx * (-b.vy / sp) + dy * (b.vx / sp) >= 0 ? 1 : -1;
-        return Math.atan2((-b.vy / sp) * side, (-b.vx / sp) * side) + Math.PI / 2 * 0;
+        const px = -b.vy / sp;
+        const py = b.vx / sp;
+        const lateral = dx * px + dy * py;
+        if (Math.abs(lateral) > PLAYER_R + b.radius + 26) continue;
+        const side = lateral >= 0 ? 1 : -1;
+        return Math.atan2(py * side, px * side);
       }
       return null;
     }
