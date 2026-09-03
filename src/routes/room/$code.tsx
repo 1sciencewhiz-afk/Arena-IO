@@ -716,7 +716,51 @@ function RoomPage() {
       return best;
     }
 
+    /** True when nothing solid sits between two points. */
+    function losClear(x1: number, y1: number, x2: number, y2: number, r = 6) {
+      const d = Math.hypot(x2 - x1, y2 - y1);
+      const steps = Math.max(2, Math.ceil(d / 26));
+      for (let i = 1; i < steps; i++) {
+        const t = i / steps;
+        if (circleHitsObstacle(world.obstacles, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t, r)) return false;
+      }
+      return true;
+    }
+
+    /**
+     * Greedy "pathfinding": probe fanned-out headings and keep the one that is
+     * both clear for a few body-lengths and closest to the desired direction.
+     */
+    function steerAround(x: number, y: number, desired: number, r: number, probe = 90) {
+      const offsets = [0, 0.4, -0.4, 0.8, -0.8, 1.2, -1.2, 1.7, -1.7, 2.2, -2.2, 2.8, -2.8, Math.PI];
+      for (const o of offsets) {
+        const a = desired + o;
+        if (losClear(x, y, x + Math.cos(a) * probe, y + Math.sin(a) * probe, r)) return a;
+      }
+      return desired;
+    }
+
+    /** Perpendicular escape direction from the nearest incoming enemy shot, if any. */
+    function dodgeVec(bot: Player, lookahead = 260) {
+      for (const b of projectilesRef.current) {
+        if (b.owner === bot.id || isBot(b.owner)) continue;
+        if (b.radius <= 0) continue;
+        const sp = Math.hypot(b.vx, b.vy);
+        if (sp < 20) continue;
+        const dx = bot.x - b.x;
+        const dy = bot.y - b.y;
+        const along = (dx * b.vx + dy * b.vy) / sp;
+        if (along < 0 || along > lookahead) continue;
+        const perpDist = Math.abs(dx * (-b.vy / sp) + dy * (b.vx / sp));
+        if (perpDist > PLAYER_R + b.radius + 26) continue;
+        const side = dx * (-b.vy / sp) + dy * (b.vx / sp) >= 0 ? 1 : -1;
+        return Math.atan2((-b.vy / sp) * side, (-b.vx / sp) * side) + Math.PI / 2 * 0;
+      }
+      return null;
+    }
+
     /** Summoned units (Army / Mini Soldiers) shoot their pistols. */
+
     function unitFire(b: Projectile, now: number) {
       const w = WEAPONS[b.weapon];
       if (!w.summon) return;
