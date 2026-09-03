@@ -25,6 +25,7 @@ import {
 import {
   buildWorld,
   decodeConfig,
+  encodeConfig,
   resolveCircle,
   safeSpawn,
   circleHitsObstacle,

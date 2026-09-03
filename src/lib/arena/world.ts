@@ -143,7 +143,7 @@ export function buildWorld(code: string, config: RoomConfig): World {
   const pickups: Pickup[] = [];
   if (config.pickups) {
     const medkits = Math.round(10 * area) + 4;
-    const boxes = Math.round(8 * area) + 3;
+    const boxes = Math.max(1, Math.round(1.2 * area));
     const freeSpot = () => {
       for (let t = 0; t < 40; t++) {
         const x = 60 + rng() * (w - 120);
