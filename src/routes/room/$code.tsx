@@ -218,7 +218,9 @@ function RoomPage() {
   const hotbarRef = useRef<WeaponId[]>(["pistol"]);
   const isAdminRef = useRef(false);
   const hostRef = useRef(false);
-  const botStateRef = useRef<Map<string, { lastFire: number; respawnAt: number; aim: number }>>(new Map());
+  const botStateRef = useRef<
+    Map<string, { lastFire: number; respawnAt: number; aim: number; slot: number; strikeAt: number; striking: boolean }>
+  >(new Map());
   const camRef = useRef({ x: 0, y: 0 });
   const takenRef = useRef<Map<string, number>>(new Map());
 
