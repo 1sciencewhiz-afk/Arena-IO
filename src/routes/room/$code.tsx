@@ -349,6 +349,11 @@ function RoomPage() {
     }
 
     function spawnProjectile(p: Projectile) {
+      // Summoned units are little soldiers: give each one its own health bar
+      if (WEAPONS[p.weapon]?.summon && p.unitHp == null) {
+        p.unitMaxHp = 14;
+        p.unitHp = 14;
+      }
       projectilesRef.current.push(p);
     }
 
