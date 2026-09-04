@@ -998,6 +998,9 @@ function RoomPage() {
         }
       }
 
+      sentryIntercept(now);
+
+
       if (now - lastBotBroadcast > 60) {
         lastBotBroadcast = now;
         for (const def of BOT_DEFS) {
