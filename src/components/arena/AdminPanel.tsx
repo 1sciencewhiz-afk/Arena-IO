@@ -68,6 +68,35 @@ export function AdminPanel() {
     await load();
   };
 
+  const takeWeaponFrom = async (p: AdminPlayer) => {
+    const w = takeWeapon[p.user_id];
+    if (!w) return;
+    const inv = p.inventory.filter((x) => x !== w);
+    const stor = p.storage_weapons.filter((x) => x !== w);
+    setBusy(p.user_id);
+    await supabase.from("profiles")
+      .update({ inventory: inv.length ? inv : ["pistol"], storage_weapons: stor, hotbar: ["pistol"] })
+      .eq("user_id", p.user_id);
+    setBusy(null);
+    await load();
+  };
+
+  const stripAllWeapons = async (p: AdminPlayer) => {
+    setBusy(p.user_id);
+    await supabase.from("profiles")
+      .update({ inventory: ["pistol"], storage_weapons: [], hotbar: ["pistol"] })
+      .eq("user_id", p.user_id);
+    setBusy(null);
+    await load();
+  };
+
+  const resetPoints = async (p: AdminPlayer) => {
+    setBusy(p.user_id);
+    await supabase.from("profiles").update({ kill_points: 0 }).eq("user_id", p.user_id);
+    setBusy(null);
+    await load();
+  };
+
   const toggleBan = async (p: AdminPlayer) => {
     setBusy(p.user_id);
     await supabase.from("profiles").update({ banned: !p.banned }).eq("user_id", p.user_id);
