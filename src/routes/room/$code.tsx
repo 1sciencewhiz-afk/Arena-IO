@@ -105,6 +105,9 @@ type Projectile = {
   homing?: { turn: number; range: number };
   immobilize?: number;   // ms freeze on hit
   nextShotAt?: number;   // summoned units: next pistol shot time
+  unitHp?: number;       // summoned units: personal health
+  unitMaxHp?: number;
+
 };
 
 type SwingFx = { x: number; y: number; ang: number; range: number; arc: number; born: number; color: string };
