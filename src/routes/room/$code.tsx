@@ -1176,6 +1176,24 @@ function RoomPage() {
         dead.add(b.id);
       }
 
+      // 1b. Summoned units are shootable: enemy fire chips their personal health
+      for (const u of list) {
+        if (!isMine(u.owner) || !WEAPONS[u.weapon]?.summon) continue;
+        if (dead.has(u.id)) continue;
+        for (const b of list) {
+          if (b === u || dead.has(b.id) || b.radius <= 0) continue;
+          if (WEAPONS[b.weapon]?.summon) continue;
+          if (b.owner === u.owner) continue;
+          if (isBot(b.owner) && isBot(u.owner)) continue;
+          if (Math.hypot(b.x - u.x, b.y - u.y) > u.radius + b.radius + 2) continue;
+          u.unitHp = (u.unitHp ?? 14) - b.dmg;
+          dead.add(b.id);
+          boomsRef.current.push({ x: u.x, y: u.y, r: 10, born: now, color: u.ownerColor });
+          if (u.unitHp <= 0) { dead.add(u.id); break; }
+        }
+      }
+
+
       // 2. Ranged shots neutralise on contact
       const cancellable = (p: Projectile) =>
         !dead.has(p.id) && p.radius > 0 && p.weapon !== "mine" &&
