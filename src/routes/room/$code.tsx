@@ -1581,7 +1581,19 @@ function RoomPage() {
         } else {
           ctx.beginPath(); ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2); ctx.fill();
         }
+
+        // Summoned units carry their own little health bar
+        if (b.unitHp != null && b.unitMaxHp) {
+          const bw = 16;
+          const frac = Math.max(0, Math.min(1, b.unitHp / b.unitMaxHp));
+          ctx.fillStyle = "rgba(0,0,0,0.55)";
+          ctx.fillRect(b.x - bw / 2, b.y - b.radius - 8, bw, 3);
+          ctx.fillStyle = frac > 0.5 ? "#4ade80" : frac > 0.25 ? "#facc15" : "#ef4444";
+          ctx.fillRect(b.x - bw / 2, b.y - b.radius - 8, bw * frac, 3);
+          ctx.fillStyle = b.ownerColor;
+        }
       }
+
 
       for (const s of swingsRef.current) {
         const age = (now - s.born) / 220;
