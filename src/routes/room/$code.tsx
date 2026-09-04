@@ -1334,8 +1334,24 @@ function RoomPage() {
           }
         }
 
+        // Summoned units walk the map: they can't phase through terrain and
+        // steer around anything in their way
+        if (WEAPONS[b.weapon]?.summon && isMine(b.owner)) {
+          const sp = Math.hypot(b.vx, b.vy) || 1;
+          const heading = Math.atan2(b.vy, b.vx);
+          const ang = steerAround(b.x, b.y, heading, b.radius + 2, 70);
+          b.vx = Math.cos(ang) * sp;
+          b.vy = Math.sin(ang) * sp;
+        }
+
         b.x += b.vx * dt;
         b.y += b.vy * dt;
+
+        if (WEAPONS[b.weapon]?.summon) {
+          const fix = resolveCircle(world.obstacles, b.x, b.y, b.radius + 1);
+          b.x = fix.x; b.y = fix.y;
+        }
+
 
         // Wall handling
         const offX = b.x < 0 || b.x > world.w;
