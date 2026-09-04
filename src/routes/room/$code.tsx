@@ -222,7 +222,10 @@ function RoomPage() {
   const isAdminRef = useRef(false);
   const hostRef = useRef(false);
   const botStateRef = useRef<
-    Map<string, { lastFire: number; respawnAt: number; aim: number; slot: number; strikeAt: number; striking: boolean }>
+    Map<string, {
+      lastFire: number; respawnAt: number; aim: number; slot: number;
+      strikeAt: number; striking: boolean; dodgeAng: number; dodgeUntil: number;
+    }>
   >(new Map());
   const camRef = useRef({ x: 0, y: 0 });
   const takenRef = useRef<Map<string, number>>(new Map());
