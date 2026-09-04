@@ -747,7 +747,11 @@ function RoomPage() {
       return desired;
     }
 
-    /** Perpendicular escape direction from the nearest incoming enemy shot, if any. */
+    /**
+     * Perpendicular escape direction from the nearest incoming enemy shot.
+     * Shots that would smack into a wall before reaching the bot are ignored,
+     * so bots stop twitching when a player sprays the cover in front of them.
+     */
     function dodgeVec(bot: Player, lookahead = 260) {
       for (const b of projectilesRef.current) {
         if (b.owner === bot.id || isBot(b.owner)) continue;
@@ -762,10 +766,60 @@ function RoomPage() {
         const py = b.vx / sp;
         const lateral = dx * px + dy * py;
         if (Math.abs(lateral) > PLAYER_R + b.radius + 26) continue;
+        // A wall between the shot and the bot means it is never arriving
+        if (!losClear(b.x, b.y, bot.x, bot.y, Math.max(4, b.radius))) continue;
         const side = lateral >= 0 ? 1 : -1;
         return Math.atan2(py * side, px * side);
       }
       return null;
+    }
+
+    /** A nearby spot that breaks line of sight with `from` — used while reloading. */
+    function coverSpot(bot: Player, from: Player) {
+      let best: { x: number; y: number; d: number } | null = null;
+      for (let i = 0; i < 12; i++) {
+        const a = (i / 12) * Math.PI * 2;
+        for (const rad of [90, 170, 250]) {
+          const x = Math.max(40, Math.min(world.w - 40, bot.x + Math.cos(a) * rad));
+          const y = Math.max(40, Math.min(world.h - 40, bot.y + Math.sin(a) * rad));
+          if (circleHitsObstacle(world.obstacles, x, y, PLAYER_R + 4)) continue;
+          if (losClear(x, y, from.x, from.y)) continue; // still exposed
+          const d = Math.hypot(x - bot.x, y - bot.y);
+          if (!best || d < best.d) best = { x, y, d };
+        }
+      }
+      return best;
+    }
+
+    /** Sentry shield: shoot down enemy fire heading for itself or a team-mate. */
+    function sentryIntercept(now: number) {
+      const sentry = playersRef.current.get("bot:ranged");
+      if (!sentry || sentry.hp <= 0) return;
+      const mates = BOT_DEFS
+        .map((d) => playersRef.current.get(d.id))
+        .filter((p): p is Player => !!p && p.hp > 0);
+      const dead: string[] = [];
+      for (const b of projectilesRef.current) {
+        if (isBot(b.owner) || b.radius <= 0) continue;
+        if (!isMine(b.owner) && !hostRef.current) continue;
+        const dS = Math.hypot(b.x - sentry.x, b.y - sentry.y);
+        if (dS > 150) continue;                                  // shield arc radius
+        // Only stop shots actually flying at the squad
+        const threat = mates.some((m) => {
+          const sp = Math.hypot(b.vx, b.vy) || 1;
+          const along = ((m.x - b.x) * b.vx + (m.y - b.y) * b.vy) / sp;
+          if (along < 0 || along > 500) return false;
+          const lateral = Math.abs((m.x - b.x) * (-b.vy / sp) + (m.y - b.y) * (b.vx / sp));
+          return lateral < PLAYER_R + b.radius + 18;
+        });
+        if (!threat) continue;
+        dead.push(b.id);
+        boomsRef.current.push({ x: b.x, y: b.y, r: 16, born: now, color: "#f97316" });
+      }
+      if (!dead.length) return;
+      const set = new Set(dead);
+      projectilesRef.current = projectilesRef.current.filter((p) => !set.has(p.id));
+      channelRef.current?.send({ type: "broadcast", event: "despawn", payload: { ids: dead } });
     }
 
     /** Summoned units (Army / Mini Soldiers) shoot their pistols. */
