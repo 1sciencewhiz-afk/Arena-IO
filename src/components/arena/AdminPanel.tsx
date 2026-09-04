@@ -19,6 +19,7 @@ export function AdminPanel() {
   const [busy, setBusy] = useState<string | null>(null);
   const [grantAmount, setGrantAmount] = useState<Record<string, string>>({});
   const [grantWeapon, setGrantWeapon] = useState<Record<string, WeaponId>>({});
+  const [takeWeapon, setTakeWeapon] = useState<Record<string, WeaponId>>({});
 
   const load = async () => {
     const { data } = await supabase
@@ -68,6 +69,35 @@ export function AdminPanel() {
     await load();
   };
 
+  const takeWeaponFrom = async (p: AdminPlayer) => {
+    const w = takeWeapon[p.user_id];
+    if (!w) return;
+    const inv = p.inventory.filter((x) => x !== w);
+    const stor = p.storage_weapons.filter((x) => x !== w);
+    setBusy(p.user_id);
+    await supabase.from("profiles")
+      .update({ inventory: inv.length ? inv : ["pistol"], storage_weapons: stor, hotbar: ["pistol"] })
+      .eq("user_id", p.user_id);
+    setBusy(null);
+    await load();
+  };
+
+  const stripAllWeapons = async (p: AdminPlayer) => {
+    setBusy(p.user_id);
+    await supabase.from("profiles")
+      .update({ inventory: ["pistol"], storage_weapons: [], hotbar: ["pistol"] })
+      .eq("user_id", p.user_id);
+    setBusy(null);
+    await load();
+  };
+
+  const resetPoints = async (p: AdminPlayer) => {
+    setBusy(p.user_id);
+    await supabase.from("profiles").update({ kill_points: 0 }).eq("user_id", p.user_id);
+    setBusy(null);
+    await load();
+  };
+
   const toggleBan = async (p: AdminPlayer) => {
     setBusy(p.user_id);
     await supabase.from("profiles").update({ banned: !p.banned }).eq("user_id", p.user_id);
@@ -112,7 +142,8 @@ export function AdminPanel() {
               <th className="px-2 py-1.5">Pts</th>
               <th className="px-2 py-1.5">Grant pts</th>
               <th className="px-2 py-1.5">Grant weapon</th>
-              <th className="px-2 py-1.5">Ban</th>
+              <th className="px-2 py-1.5">Take weapon</th>
+              <th className="px-2 py-1.5">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -156,20 +187,52 @@ export function AdminPanel() {
                   </div>
                 </td>
                 <td className="px-2 py-1.5">
-                  <Button
-                    size="sm"
-                    variant={p.banned ? "secondary" : "destructive"}
-                    disabled={busy === p.user_id}
-                    onClick={() => void toggleBan(p)}
-                  >
-                    {p.banned ? "Unban" : "Ban"}
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    <select
+                      className="h-7 rounded border border-foreground/10 bg-background px-1 text-[11px]"
+                      value={takeWeapon[p.user_id] ?? ""}
+                      onChange={(e) =>
+                        setTakeWeapon({ ...takeWeapon, [p.user_id]: e.target.value as WeaponId })
+                      }
+                    >
+                      <option value="">—</option>
+                      {[...p.inventory, ...p.storage_weapons].map((w) => (
+                        <option key={w} value={w}>{WEAPONS[w].name}</option>
+                      ))}
+                    </select>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      disabled={busy === p.user_id || !takeWeapon[p.user_id]}
+                      onClick={() => void takeWeaponFrom(p)}
+                    >
+                      Take
+                    </Button>
+                  </div>
+                </td>
+                <td className="px-2 py-1.5">
+                  <div className="flex flex-wrap items-center gap-1">
+                    <Button
+                      size="sm"
+                      variant={p.banned ? "secondary" : "destructive"}
+                      disabled={busy === p.user_id}
+                      onClick={() => void toggleBan(p)}
+                    >
+                      {p.banned ? "Unban" : "Ban"}
+                    </Button>
+                    <Button size="sm" variant="secondary" disabled={busy === p.user_id} onClick={() => void stripAllWeapons(p)}>
+                      Strip all
+                    </Button>
+                    <Button size="sm" variant="secondary" disabled={busy === p.user_id} onClick={() => void resetPoints(p)}>
+                      Zero pts
+                    </Button>
+                  </div>
                 </td>
               </tr>
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-2 py-6 text-center text-foreground/40">
+                <td colSpan={6} className="px-2 py-6 text-center text-foreground/40">
                   No players match.
                 </td>
               </tr>

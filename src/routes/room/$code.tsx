@@ -105,6 +105,9 @@ type Projectile = {
   homing?: { turn: number; range: number };
   immobilize?: number;   // ms freeze on hit
   nextShotAt?: number;   // summoned units: next pistol shot time
+  unitHp?: number;       // summoned units: personal health
+  unitMaxHp?: number;
+
 };
 
 type SwingFx = { x: number; y: number; ang: number; range: number; arc: number; born: number; color: string };
@@ -219,7 +222,10 @@ function RoomPage() {
   const isAdminRef = useRef(false);
   const hostRef = useRef(false);
   const botStateRef = useRef<
-    Map<string, { lastFire: number; respawnAt: number; aim: number; slot: number; strikeAt: number; striking: boolean }>
+    Map<string, {
+      lastFire: number; respawnAt: number; aim: number; slot: number;
+      strikeAt: number; striking: boolean; dodgeAng: number; dodgeUntil: number;
+    }>
   >(new Map());
   const camRef = useRef({ x: 0, y: 0 });
   const takenRef = useRef<Map<string, number>>(new Map());
@@ -343,6 +349,11 @@ function RoomPage() {
     }
 
     function spawnProjectile(p: Projectile) {
+      // Summoned units are little soldiers: give each one its own health bar
+      if (WEAPONS[p.weapon]?.summon && p.unitHp == null) {
+        p.unitMaxHp = 14;
+        p.unitHp = 14;
+      }
       projectilesRef.current.push(p);
     }
 
@@ -678,6 +689,7 @@ function RoomPage() {
         if (!botStateRef.current.has(def.id)) {
           botStateRef.current.set(def.id, {
             lastFire: 0, respawnAt: 0, aim: 0, slot: i, strikeAt: 0, striking: false,
+            dodgeAng: 0, dodgeUntil: 0,
           });
         }
       });
@@ -740,7 +752,11 @@ function RoomPage() {
       return desired;
     }
 
-    /** Perpendicular escape direction from the nearest incoming enemy shot, if any. */
+    /**
+     * Perpendicular escape direction from the nearest incoming enemy shot.
+     * Shots that would smack into a wall before reaching the bot are ignored,
+     * so bots stop twitching when a player sprays the cover in front of them.
+     */
     function dodgeVec(bot: Player, lookahead = 260) {
       for (const b of projectilesRef.current) {
         if (b.owner === bot.id || isBot(b.owner)) continue;
@@ -755,10 +771,60 @@ function RoomPage() {
         const py = b.vx / sp;
         const lateral = dx * px + dy * py;
         if (Math.abs(lateral) > PLAYER_R + b.radius + 26) continue;
+        // A wall between the shot and the bot means it is never arriving
+        if (!losClear(b.x, b.y, bot.x, bot.y, Math.max(4, b.radius))) continue;
         const side = lateral >= 0 ? 1 : -1;
         return Math.atan2(py * side, px * side);
       }
       return null;
+    }
+
+    /** A nearby spot that breaks line of sight with `from` — used while reloading. */
+    function coverSpot(bot: Player, from: Player) {
+      let best: { x: number; y: number; d: number } | null = null;
+      for (let i = 0; i < 12; i++) {
+        const a = (i / 12) * Math.PI * 2;
+        for (const rad of [90, 170, 250]) {
+          const x = Math.max(40, Math.min(world.w - 40, bot.x + Math.cos(a) * rad));
+          const y = Math.max(40, Math.min(world.h - 40, bot.y + Math.sin(a) * rad));
+          if (circleHitsObstacle(world.obstacles, x, y, PLAYER_R + 4)) continue;
+          if (losClear(x, y, from.x, from.y)) continue; // still exposed
+          const d = Math.hypot(x - bot.x, y - bot.y);
+          if (!best || d < best.d) best = { x, y, d };
+        }
+      }
+      return best;
+    }
+
+    /** Sentry shield: shoot down enemy fire heading for itself or a team-mate. */
+    function sentryIntercept(now: number) {
+      const sentry = playersRef.current.get("bot:ranged");
+      if (!sentry || sentry.hp <= 0) return;
+      const mates = BOT_DEFS
+        .map((d) => playersRef.current.get(d.id))
+        .filter((p): p is Player => !!p && p.hp > 0);
+      const dead: string[] = [];
+      for (const b of projectilesRef.current) {
+        if (isBot(b.owner) || b.radius <= 0) continue;
+        if (!isMine(b.owner) && !hostRef.current) continue;
+        const dS = Math.hypot(b.x - sentry.x, b.y - sentry.y);
+        if (dS > 150) continue;                                  // shield arc radius
+        // Only stop shots actually flying at the squad
+        const threat = mates.some((m) => {
+          const sp = Math.hypot(b.vx, b.vy) || 1;
+          const along = ((m.x - b.x) * b.vx + (m.y - b.y) * b.vy) / sp;
+          if (along < 0 || along > 500) return false;
+          const lateral = Math.abs((m.x - b.x) * (-b.vy / sp) + (m.y - b.y) * (b.vx / sp));
+          return lateral < PLAYER_R + b.radius + 18;
+        });
+        if (!threat) continue;
+        dead.push(b.id);
+        boomsRef.current.push({ x: b.x, y: b.y, r: 16, born: now, color: "#f97316" });
+      }
+      if (!dead.length) return;
+      const set = new Set(dead);
+      projectilesRef.current = projectilesRef.current.filter((p) => !set.has(p.id));
+      channelRef.current?.send({ type: "broadcast", event: "despawn", payload: { ids: dead } });
     }
 
     /** Summoned units (Army / Mini Soldiers) shoot their pistols. */
@@ -853,16 +919,35 @@ function RoomPage() {
           desired = Math.atan2(dy, dx);
         }
 
-        // Everyone but the Sentry sidesteps incoming fire
-        let speedMul = 1;
-        if (def.id !== "bot:ranged") {
-          const dodge = dodgeVec(bot);
-          if (dodge != null) { desired = dodge; speedMul = 1.25; }
+        // Warlock retreats behind cover while its summon is on cooldown
+        let reloading = false;
+        if (def.id === "bot:summoner") {
+          const wDef = WEAPONS[def.weapon];
+          reloading = now - st.lastFire < wDef.cooldown * 1000;
+          if (reloading && seen) {
+            const spot = coverSpot(bot, focus);
+            if (spot) desired = Math.atan2(spot.y - bot.y, spot.x - bot.x);
+          }
         }
 
-        if (goalD > 26 || speedMul > 1) {
+        // Everyone but the Sentry sidesteps incoming fire, committing to a
+        // direction for a moment so they don't jitter in place
+        let speedMul = 1;
+        if (def.id !== "bot:ranged") {
+          if (now < st.dodgeUntil) {
+            desired = st.dodgeAng; speedMul = 1.25;
+          } else {
+            const dodge = dodgeVec(bot);
+            if (dodge != null) {
+              st.dodgeAng = dodge; st.dodgeUntil = now + 380;
+              desired = dodge; speedMul = 1.25;
+            }
+          }
+        }
+
+        if (goalD > 26 || speedMul > 1 || reloading) {
           const ang = steerAround(bot.x, bot.y, desired, PLAYER_R, Math.min(110, goalD + 30));
-          const sp = def.speed * (st.striking ? 1.15 : 0.85) * speedMul;
+          const sp = def.speed * (st.striking ? 1.15 : 0.85) * speedMul * (reloading ? 1.1 : 1);
           bot.x += Math.cos(ang) * sp * dt;
           bot.y += Math.sin(ang) * sp * dt;
           bot.x = Math.max(PLAYER_R, Math.min(world.w - PLAYER_R, bot.x));
@@ -912,6 +997,9 @@ function RoomPage() {
           spawnOwnedBullet(bot.id, bot.color, def.weapon, bot.x, bot.y, bot.aim + jitter, w.dmg, now, "b");
         }
       }
+
+      sentryIntercept(now);
+
 
       if (now - lastBotBroadcast > 60) {
         lastBotBroadcast = now;
@@ -1088,6 +1176,24 @@ function RoomPage() {
         dead.add(b.id);
       }
 
+      // 1b. Summoned units are shootable: enemy fire chips their personal health
+      for (const u of list) {
+        if (!isMine(u.owner) || !WEAPONS[u.weapon]?.summon) continue;
+        if (dead.has(u.id)) continue;
+        for (const b of list) {
+          if (b === u || dead.has(b.id) || b.radius <= 0) continue;
+          if (WEAPONS[b.weapon]?.summon) continue;
+          if (b.owner === u.owner) continue;
+          if (isBot(b.owner) && isBot(u.owner)) continue;
+          if (Math.hypot(b.x - u.x, b.y - u.y) > u.radius + b.radius + 2) continue;
+          u.unitHp = (u.unitHp ?? 14) - b.dmg;
+          dead.add(b.id);
+          boomsRef.current.push({ x: u.x, y: u.y, r: 10, born: now, color: u.ownerColor });
+          if (u.unitHp <= 0) { dead.add(u.id); break; }
+        }
+      }
+
+
       // 2. Ranged shots neutralise on contact
       const cancellable = (p: Projectile) =>
         !dead.has(p.id) && p.radius > 0 && p.weapon !== "mine" &&
@@ -1228,8 +1334,24 @@ function RoomPage() {
           }
         }
 
+        // Summoned units walk the map: they can't phase through terrain and
+        // steer around anything in their way
+        if (WEAPONS[b.weapon]?.summon && isMine(b.owner)) {
+          const sp = Math.hypot(b.vx, b.vy) || 1;
+          const heading = Math.atan2(b.vy, b.vx);
+          const ang = steerAround(b.x, b.y, heading, b.radius + 2, 70);
+          b.vx = Math.cos(ang) * sp;
+          b.vy = Math.sin(ang) * sp;
+        }
+
         b.x += b.vx * dt;
         b.y += b.vy * dt;
+
+        if (WEAPONS[b.weapon]?.summon) {
+          const fix = resolveCircle(world.obstacles, b.x, b.y, b.radius + 1);
+          b.x = fix.x; b.y = fix.y;
+        }
+
 
         // Wall handling
         const offX = b.x < 0 || b.x > world.w;
@@ -1459,7 +1581,19 @@ function RoomPage() {
         } else {
           ctx.beginPath(); ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2); ctx.fill();
         }
+
+        // Summoned units carry their own little health bar
+        if (b.unitHp != null && b.unitMaxHp) {
+          const bw = 16;
+          const frac = Math.max(0, Math.min(1, b.unitHp / b.unitMaxHp));
+          ctx.fillStyle = "rgba(0,0,0,0.55)";
+          ctx.fillRect(b.x - bw / 2, b.y - b.radius - 8, bw, 3);
+          ctx.fillStyle = frac > 0.5 ? "#4ade80" : frac > 0.25 ? "#facc15" : "#ef4444";
+          ctx.fillRect(b.x - bw / 2, b.y - b.radius - 8, bw * frac, 3);
+          ctx.fillStyle = b.ownerColor;
+        }
       }
+
 
       for (const s of swingsRef.current) {
         const age = (now - s.born) / 220;
