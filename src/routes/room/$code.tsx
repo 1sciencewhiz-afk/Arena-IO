@@ -914,16 +914,35 @@ function RoomPage() {
           desired = Math.atan2(dy, dx);
         }
 
-        // Everyone but the Sentry sidesteps incoming fire
-        let speedMul = 1;
-        if (def.id !== "bot:ranged") {
-          const dodge = dodgeVec(bot);
-          if (dodge != null) { desired = dodge; speedMul = 1.25; }
+        // Warlock retreats behind cover while its summon is on cooldown
+        let reloading = false;
+        if (def.id === "bot:summoner") {
+          const wDef = WEAPONS[def.weapon];
+          reloading = now - st.lastFire < wDef.cooldown * 1000;
+          if (reloading && seen) {
+            const spot = coverSpot(bot, focus);
+            if (spot) desired = Math.atan2(spot.y - bot.y, spot.x - bot.x);
+          }
         }
 
-        if (goalD > 26 || speedMul > 1) {
+        // Everyone but the Sentry sidesteps incoming fire, committing to a
+        // direction for a moment so they don't jitter in place
+        let speedMul = 1;
+        if (def.id !== "bot:ranged") {
+          if (now < st.dodgeUntil) {
+            desired = st.dodgeAng; speedMul = 1.25;
+          } else {
+            const dodge = dodgeVec(bot);
+            if (dodge != null) {
+              st.dodgeAng = dodge; st.dodgeUntil = now + 380;
+              desired = dodge; speedMul = 1.25;
+            }
+          }
+        }
+
+        if (goalD > 26 || speedMul > 1 || reloading) {
           const ang = steerAround(bot.x, bot.y, desired, PLAYER_R, Math.min(110, goalD + 30));
-          const sp = def.speed * (st.striking ? 1.15 : 0.85) * speedMul;
+          const sp = def.speed * (st.striking ? 1.15 : 0.85) * speedMul * (reloading ? 1.1 : 1);
           bot.x += Math.cos(ang) * sp * dt;
           bot.y += Math.sin(ang) * sp * dt;
           bot.x = Math.max(PLAYER_R, Math.min(world.w - PLAYER_R, bot.x));
