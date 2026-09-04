@@ -684,6 +684,7 @@ function RoomPage() {
         if (!botStateRef.current.has(def.id)) {
           botStateRef.current.set(def.id, {
             lastFire: 0, respawnAt: 0, aim: 0, slot: i, strikeAt: 0, striking: false,
+            dodgeAng: 0, dodgeUntil: 0,
           });
         }
       });
