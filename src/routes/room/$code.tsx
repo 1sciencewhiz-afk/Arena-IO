@@ -1238,12 +1238,14 @@ function RoomPage() {
 
       const self = playersRef.current.get(me.id);
       if (self && self.hp > 0) {
-        // Admin: infinite HP
+        // Admin: high but finite health pool
         if (isAdminRef.current) {
-          if (self.maxHp < 99999) self.maxHp = 99999;
-          self.hp = self.maxHp;
-          self.immobilizedUntil = 0;
+          if (self.maxHp !== ADMIN_HP) {
+            self.maxHp = ADMIN_HP;
+            self.hp = Math.min(self.hp, ADMIN_HP);
+          }
         }
+
         const frozen = self.immobilizedUntil > now;
         let dx = 0; let dy = 0;
         if (!frozen) {
