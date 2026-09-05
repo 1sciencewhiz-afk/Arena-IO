@@ -1025,6 +1025,7 @@ function RoomPage() {
       const wId = weaponRef.current;
       if (!hotbarRef.current.includes(wId)) return;
       const w = WEAPONS[wId];
+      if (w.melee) { swingMelee(now, w.id); return; }
       const t = now / 1000;
       const cd = w.cooldown * cooldownMult(self.upgrades);
       if (t - lastFireRef.current[w.id] < cd) return;
@@ -1033,7 +1034,7 @@ function RoomPage() {
       const ang = currentAimAngle(self);
       const dmgScale = dmgMult(self.upgrades);
 
-      if (w.melee) { swingMelee(now, w.id); return; }
+
 
       if (w.placeable) {
         const p: Projectile = {
