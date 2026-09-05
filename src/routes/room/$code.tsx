@@ -53,7 +53,7 @@ const VIEW_W = 1200;
 const VIEW_H = 700;
 const PLAYER_R = 18;
 const BASE_SPEED = 260;
-const ADMIN_HP = 99999;
+const ADMIN_HP = 999;
 
 /** Cooperative AI squad — one ranged, one summoner, one melee. */
 type BotDef = {
