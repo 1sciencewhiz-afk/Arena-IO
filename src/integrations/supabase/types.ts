@@ -56,6 +56,45 @@ export type Database = {
         }
         Relationships: []
       }
+      suggestions: {
+        Row: {
+          ai_response: string | null
+          created_at: string
+          details: string
+          id: string
+          kind: Database["public"]["Enums"]["suggestion_type"]
+          reviewed_at: string | null
+          status: Database["public"]["Enums"]["suggestion_status"]
+          updated_at: string
+          user_id: string
+          username: string
+        }
+        Insert: {
+          ai_response?: string | null
+          created_at?: string
+          details: string
+          id?: string
+          kind: Database["public"]["Enums"]["suggestion_type"]
+          reviewed_at?: string | null
+          status?: Database["public"]["Enums"]["suggestion_status"]
+          updated_at?: string
+          user_id: string
+          username: string
+        }
+        Update: {
+          ai_response?: string | null
+          created_at?: string
+          details?: string
+          id?: string
+          kind?: Database["public"]["Enums"]["suggestion_type"]
+          reviewed_at?: string | null
+          status?: Database["public"]["Enums"]["suggestion_status"]
+          updated_at?: string
+          user_id?: string
+          username?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           created_at: string
@@ -92,6 +131,12 @@ export type Database = {
     }
     Enums: {
       app_role: "admin" | "moderator" | "user"
+      suggestion_status: "pending" | "approved" | "rejected"
+      suggestion_type:
+        | "technical"
+        | "gameplay"
+        | "new_content"
+        | "visual_effects"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -220,6 +265,13 @@ export const Constants = {
   public: {
     Enums: {
       app_role: ["admin", "moderator", "user"],
+      suggestion_status: ["pending", "approved", "rejected"],
+      suggestion_type: [
+        "technical",
+        "gameplay",
+        "new_content",
+        "visual_effects",
+      ],
     },
   },
 } as const

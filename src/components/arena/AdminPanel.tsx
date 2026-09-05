@@ -120,7 +120,7 @@ export function AdminPanel() {
             <h3 className="text-sm font-bold uppercase tracking-wider">Player Management</h3>
           </div>
           <div className="text-[11px] text-foreground/60">
-            {players.length} players · You also have infinite HP in matches.
+            {players.length} players · Your health is capped at 999 in matches.
           </div>
         </div>
         <div className="flex items-center gap-2">

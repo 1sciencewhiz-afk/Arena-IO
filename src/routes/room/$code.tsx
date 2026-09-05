@@ -53,7 +53,7 @@ const VIEW_W = 1200;
 const VIEW_H = 700;
 const PLAYER_R = 18;
 const BASE_SPEED = 260;
-const ADMIN_HP = 99999;
+const ADMIN_HP = 999;
 
 /** Cooperative AI squad — one ranged, one summoner, one melee. */
 type BotDef = {
@@ -1025,6 +1025,7 @@ function RoomPage() {
       const wId = weaponRef.current;
       if (!hotbarRef.current.includes(wId)) return;
       const w = WEAPONS[wId];
+      if (w.melee) { swingMelee(now, w.id); return; }
       const t = now / 1000;
       const cd = w.cooldown * cooldownMult(self.upgrades);
       if (t - lastFireRef.current[w.id] < cd) return;
@@ -1033,7 +1034,7 @@ function RoomPage() {
       const ang = currentAimAngle(self);
       const dmgScale = dmgMult(self.upgrades);
 
-      if (w.melee) { swingMelee(now, w.id); return; }
+
 
       if (w.placeable) {
         const p: Projectile = {
@@ -1237,12 +1238,14 @@ function RoomPage() {
 
       const self = playersRef.current.get(me.id);
       if (self && self.hp > 0) {
-        // Admin: infinite HP
+        // Admin: high but finite health pool
         if (isAdminRef.current) {
-          if (self.maxHp < 99999) self.maxHp = 99999;
-          self.hp = self.maxHp;
-          self.immobilizedUntil = 0;
+          if (self.maxHp !== ADMIN_HP) {
+            self.maxHp = ADMIN_HP;
+            self.hp = Math.min(self.hp, ADMIN_HP);
+          }
         }
+
         const frozen = self.immobilizedUntil > now;
         let dx = 0; let dy = 0;
         if (!frozen) {

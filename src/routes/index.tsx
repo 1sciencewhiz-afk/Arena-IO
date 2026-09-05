@@ -15,6 +15,8 @@ import { useAuthUser, useProfile, signOut, useIsAdmin } from "@/lib/arena/auth";
 import { useLoadout } from "@/lib/arena/loadout";
 import { Armory } from "@/components/arena/Armory";
 import { AdminPanel } from "@/components/arena/AdminPanel";
+import { SuggestionForm } from "@/components/arena/SuggestionForm";
+import { SuggestionAdmin } from "@/components/arena/SuggestionAdmin";
 
 export const PUBLIC_ROOM_CODE = "PUBLIC";
 
@@ -323,7 +325,11 @@ function Index() {
         {/* Armory */}
         <Armory loadout={loadout} update={update} isGuest={isGuest} />
 
+        <SuggestionForm userId={userId} username={profile?.username ?? name} />
+
         {isAdmin && <AdminPanel />}
+
+        {isAdmin && <SuggestionAdmin />}
 
         {profile?.banned && (
           <p className="text-center text-xs font-bold text-red-400">
