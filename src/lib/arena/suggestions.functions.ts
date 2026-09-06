@@ -25,9 +25,6 @@ export const aiReviewSuggestion = createServerFn({ method: "POST" })
       .maybeSingle();
     if (error || !row) throw new Error("Suggestion not found");
 
-    const apiKey = process.env["LOVABLE_API_KEY"];
-    if (!apiKey) throw new Error("AI is not configured for this project.");
-
     const apiKey = process.env["GEMINI_API_KEY"];
     if (!apiKey) throw new Error("AI is not configured for this project.");
 
