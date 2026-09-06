@@ -1427,6 +1427,14 @@ function RoomPage() {
         if (WEAPONS[b.weapon]?.summon) {
           const fix = resolveCircle(world.obstacles, b.x, b.y, b.radius + 1);
           b.x = fix.x; b.y = fix.y;
+          for (const z of world.safeZones) {
+            const d = Math.hypot(b.x - z.x, b.y - z.y);
+            if (d < z.r + b.radius) {
+              const ang2 = d < 0.001 ? 0 : Math.atan2(b.y - z.y, b.x - z.x);
+              b.x = z.x + Math.cos(ang2) * (z.r + b.radius);
+              b.y = z.y + Math.sin(ang2) * (z.r + b.radius);
+            }
+          }
           if (isMine(b.owner)) {
             const moved = Math.hypot(b.x - beforeX, b.y - beforeY);
             if (moved < Math.hypot(b.vx, b.vy) * dt * 0.4) {
