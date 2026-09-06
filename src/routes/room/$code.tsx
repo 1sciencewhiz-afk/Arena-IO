@@ -946,9 +946,17 @@ function RoomPage() {
         let desired = Math.atan2(goalY - bot.y, goalX - bot.x);
         const goalD = Math.hypot(goalX - bot.x, goalY - bot.y);
 
-        // Sentry body-blocks: it slides into the firing line in front of the squad
-        if (def.id === "bot:ranged" && st.striking) {
-          desired = Math.atan2(dy, dx);
+        // Sentry never charges: it holds a firing line and backs off when
+        // a player closes the gap, staying alive to block shots.
+        if (def.id === "bot:ranged") {
+          const hold = def.range * 0.8;
+          if (dist < hold - 60) {
+            desired = Math.atan2(-dy, -dx);       // retreat
+          } else if (dist > def.range * 0.95) {
+            desired = Math.atan2(dy, dx);          // drift into range
+          } else {
+            desired = Math.atan2(dy, dx) + Math.PI / 2; // strafe on the line
+          }
         }
 
         // Warlock retreats behind cover while its summon is on cooldown
@@ -962,22 +970,28 @@ function RoomPage() {
           }
         }
 
-        // Everyone but the Sentry sidesteps incoming fire, committing to a
-        // direction for a moment so they don't jitter in place
+        // Twitchy evasion: bots flick side to side under fire so they are hard
+        // to lead, but only against shots that can actually reach them.
         let speedMul = 1;
-        if (def.id !== "bot:ranged") {
-          if (now < st.dodgeUntil) {
-            desired = st.dodgeAng; speedMul = 1.25;
-          } else {
-            const dodge = dodgeVec(bot);
-            if (dodge != null) {
-              st.dodgeAng = dodge; st.dodgeUntil = now + 380;
-              desired = dodge; speedMul = 1.25;
-            }
+        let jinking = false;
+        if (now < st.dodgeUntil) {
+          desired = st.dodgeAng; speedMul = 1.35; jinking = true;
+        } else {
+          const dodge = dodgeVec(bot);
+          if (dodge != null) {
+            // Alternate sides each burst for a shuddering, unpredictable path
+            const flip = Math.sin(now / 90) > 0 ? 0 : Math.PI;
+            st.dodgeAng = dodge + flip;
+            st.dodgeUntil = now + 130;
+            desired = st.dodgeAng; speedMul = 1.35; jinking = true;
           }
         }
+        // Constant micro-strafe while engaged keeps them shuddering
+        if (!jinking && seen && dist < def.range * 1.1) {
+          desired += Math.sin(now / 140 + st.slot) * 0.9;
+        }
 
-        if (goalD > 26 || speedMul > 1 || reloading) {
+        if (goalD > 26 || speedMul > 1 || reloading || (seen && dist < def.range * 1.1)) {
           const ang = steerAround(bot.x, bot.y, desired, PLAYER_R, Math.min(110, goalD + 30));
           const sp = def.speed * (st.striking ? 1.15 : 0.85) * speedMul * (reloading ? 1.1 : 1);
           bot.x += Math.cos(ang) * sp * dt;
