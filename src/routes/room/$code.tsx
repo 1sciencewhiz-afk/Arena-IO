@@ -29,6 +29,7 @@ import {
   resolveCircle,
   safeSpawn,
   circleHitsObstacle,
+  inSafeZone,
   groupSpawn,
   randomLootWeapon,
   MEDKIT_HEAL,
@@ -104,6 +105,10 @@ type Projectile = {
   hitSet?: Set<string>;  // pierce: who already got hit
   homing?: { turn: number; range: number };
   immobilize?: number;   // ms freeze on hit
+  px?: number;           // previous position (swept collision)
+  py?: number;
+  seek?: number;         // summoned units: current heading
+  stuckAt?: number;      // summoned units: last time they got wedged
   nextShotAt?: number;   // summoned units: next pistol shot time
   unitHp?: number;       // summoned units: personal health
   unitMaxHp?: number;
@@ -360,6 +365,10 @@ function RoomPage() {
     function applyDamage(targetId: string, byId: string, dmg: number, weapon: WeaponId, immobilizeMs?: number) {
       const t = playersRef.current.get(targetId);
       if (!t || t.hp <= 0) return;
+      // Respawn safe zones: no damage in, no damage out
+      if (inSafeZone(world, t.x, t.y)) return;
+      const attacker = playersRef.current.get(byId);
+      if (attacker && inSafeZone(world, attacker.x, attacker.y)) return;
       t.hp = Math.max(0, t.hp - dmg * damageTakenMult(t.upgrades));
       if (immobilizeMs && targetId === me.id) {
         t.immobilizedUntil = Math.max(t.immobilizedUntil, performance.now() + immobilizeMs);
@@ -476,11 +485,9 @@ function RoomPage() {
           if (!wDef) continue;
           const maxDmg = wDef.dmg * 3;
           const safeDmg = Math.max(0, Math.min(Number(pr.dmg) || 0, maxDmg));
-          projectilesRef.current.push({
-            ...pr,
-            dmg: safeDmg,
-            hitSet: undefined, // remote-rendered, local set not needed
-          });
+          const rp: Projectile = { ...pr, dmg: safeDmg, hitSet: undefined };
+          if (wDef.summon && rp.unitHp == null) { rp.unitMaxHp = 14; rp.unitHp = 14; }
+          projectilesRef.current.push(rp);
         }
       })
       .on("broadcast", { event: "swing" }, ({ payload }) => {
@@ -727,6 +734,31 @@ function RoomPage() {
       }
       return best;
     }
+
+    /** Shortest distance from a point to a movement segment. */
+    function segDist(px: number, py: number, x1: number, y1: number, x2: number, y2: number) {
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const len2 = dx * dx + dy * dy;
+      if (len2 < 0.0001) return Math.hypot(px - x1, py - y1);
+      let t = ((px - x1) * dx + (py - y1) * dy) / len2;
+      t = Math.max(0, Math.min(1, t));
+      return Math.hypot(px - (x1 + dx * t), py - (y1 + dy * t));
+    }
+
+    /** Swept terrain test along a projectile's travel this frame. */
+    function segHitsObstacle(x1: number, y1: number, x2: number, y2: number, r: number) {
+      const d = Math.hypot(x2 - x1, y2 - y1);
+      const steps = Math.max(1, Math.ceil(d / Math.max(4, r)));
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        if (circleHitsObstacle(world.obstacles, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t, r)) return true;
+      }
+      return false;
+    }
+
+    /** Travel path of a projectile this frame (falls back to its position). */
+    const pathOf = (b: Projectile) => ({ x1: b.px ?? b.x, y1: b.py ?? b.y, x2: b.x, y2: b.y });
 
     /** True when nothing solid sits between two points. */
     function losClear(x1: number, y1: number, x2: number, y2: number, r = 6) {
@@ -1164,7 +1196,14 @@ function RoomPage() {
       for (const b of list) {
         if (!isMine(b.owner)) continue;
         if (b.weapon === "mine" || WEAPONS[b.weapon]?.summon || b.radius <= 0) continue;
-        if (!circleHitsObstacle(world.obstacles, b.x, b.y, b.radius)) continue;
+        // Shots dissolve at the edge of a respawn safe zone
+        if (inSafeZone(world, b.x, b.y)) {
+          dead.add(b.id);
+          boomsRef.current.push({ x: b.x, y: b.y, r: 10, born: now, color: "#7dd3fc" });
+          continue;
+        }
+        const path = pathOf(b);
+        if (!segHitsObstacle(path.x1, path.y1, path.x2, path.y2, b.radius)) continue;
         if (b.bouncesLeft && b.bouncesLeft > 0) {
           const hx = circleHitsObstacle(world.obstacles, b.x + Math.sign(b.vx) * (b.radius + 2), b.y, b.radius);
           if (hx) b.vx = -b.vx; else b.vy = -b.vy;
@@ -1186,7 +1225,8 @@ function RoomPage() {
           if (WEAPONS[b.weapon]?.summon) continue;
           if (b.owner === u.owner) continue;
           if (isBot(b.owner) && isBot(u.owner)) continue;
-          if (Math.hypot(b.x - u.x, b.y - u.y) > u.radius + b.radius + 2) continue;
+          const bp = pathOf(b);
+          if (segDist(u.x, u.y, bp.x1, bp.y1, bp.x2, bp.y2) > u.radius + b.radius + 2) continue;
           u.unitHp = (u.unitHp ?? 14) - b.dmg;
           dead.add(b.id);
           boomsRef.current.push({ x: u.x, y: u.y, r: 10, born: now, color: u.ownerColor });
@@ -1201,7 +1241,8 @@ function RoomPage() {
         !WEAPONS[p.weapon]?.summon && !WEAPONS[p.weapon]?.placeable &&
         (p.vx !== 0 || p.vy !== 0);
 
-      for (let i = 0; i < list.length; i++) {
+      const pairLimit = list.length <= 220; // skip the O(n2) pass under heavy fire
+      for (let i = 0; pairLimit && i < list.length; i++) {
         const a = list[i];
         if (!cancellable(a)) continue;
         for (let j = i + 1; j < list.length; j++) {
@@ -1305,7 +1346,12 @@ function RoomPage() {
 
       // Update projectiles + collision
       const alive: Projectile[] = [];
+      // Cap the simulated swarm so heavy fire cannot stall the frame
+      if (projectilesRef.current.length > 500) {
+        projectilesRef.current = projectilesRef.current.slice(-500);
+      }
       for (const b of projectilesRef.current) {
+        b.px = b.x; b.py = b.y;
         // Lifetime / fuse
         if (now - b.born > b.lifetime) {
           if (b.splash && isMine(b.owner)) explode(b);
@@ -1340,19 +1386,43 @@ function RoomPage() {
         // Summoned units walk the map: they can't phase through terrain and
         // steer around anything in their way
         if (WEAPONS[b.weapon]?.summon && isMine(b.owner)) {
-          const sp = Math.hypot(b.vx, b.vy) || 1;
-          const heading = Math.atan2(b.vy, b.vx);
-          const ang = steerAround(b.x, b.y, heading, b.radius + 2, 70);
+          const sp = Math.hypot(b.vx, b.vy) || 90;
+          const foe = nearestEnemy(b.owner, b.x, b.y, 1400);
+          const want = foe
+            ? Math.atan2(foe.y - b.y, foe.x - b.x)
+            : (b.seek ?? Math.atan2(b.vy, b.vx));
+          const ang = steerAround(b.x, b.y, want, b.radius + 3, 120);
+          b.seek = ang;
           b.vx = Math.cos(ang) * sp;
           b.vy = Math.sin(ang) * sp;
         }
 
+        const beforeX = b.x; const beforeY = b.y;
         b.x += b.vx * dt;
         b.y += b.vy * dt;
 
         if (WEAPONS[b.weapon]?.summon) {
           const fix = resolveCircle(world.obstacles, b.x, b.y, b.radius + 1);
           b.x = fix.x; b.y = fix.y;
+          if (isMine(b.owner)) {
+            const moved = Math.hypot(b.x - beforeX, b.y - beforeY);
+            if (moved < Math.hypot(b.vx, b.vy) * dt * 0.4) {
+              // Wedged against a wall: peel off along it instead of pushing in
+              if ((b.stuckAt ?? 0) === 0) b.stuckAt = now;
+              const sp = Math.hypot(b.vx, b.vy) || 90;
+              const turn = ((now - (b.stuckAt ?? now)) > 700 ? -1 : 1) * 1.1;
+              const ang = (b.seek ?? Math.atan2(b.vy, b.vx)) + turn;
+              b.seek = ang;
+              b.vx = Math.cos(ang) * sp;
+              b.vy = Math.sin(ang) * sp;
+              b.x += b.vx * dt * 0.6;
+              b.y += b.vy * dt * 0.6;
+              const fix2 = resolveCircle(world.obstacles, b.x, b.y, b.radius + 1);
+              b.x = fix2.x; b.y = fix2.y;
+            } else if ((b.stuckAt ?? 0) !== 0 && now - (b.stuckAt ?? 0) > 1400) {
+              b.stuckAt = 0;
+            }
+          }
         }
 
 
@@ -1393,7 +1463,9 @@ function RoomPage() {
               for (const other of playersRef.current.values()) {
                 if (!isEnemyOf(b.owner, other)) continue;
                 if (b.hitSet?.has(other.id)) continue;
-                if (Math.hypot(other.x - b.x, other.y - b.y) < PLAYER_R + b.radius) {
+                if (inSafeZone(world, other.x, other.y)) continue;
+                const bp = pathOf(b);
+                if (segDist(other.x, other.y, bp.x1, bp.y1, bp.x2, bp.y2) < PLAYER_R + b.radius) {
                   hits.push(other);
                 }
               }
@@ -1410,7 +1482,9 @@ function RoomPage() {
               let hit: Player | null = null;
               for (const other of playersRef.current.values()) {
                 if (!isEnemyOf(b.owner, other)) continue;
-                if (Math.hypot(other.x - b.x, other.y - b.y) < PLAYER_R + b.radius) { hit = other; break; }
+                if (inSafeZone(world, other.x, other.y)) continue;
+                const bp = pathOf(b);
+                if (segDist(other.x, other.y, bp.x1, bp.y1, bp.x2, bp.y2) < PLAYER_R + b.radius) { hit = other; break; }
               }
               if (hit) {
                 if (b.splash) {
