@@ -78,12 +78,28 @@ export function seededRng(seed: string) {
   };
 }
 
+export type SafeZone = { x: number; y: number; r: number };
+
 export type World = {
   w: number;
   h: number;
   obstacles: Obstacle[];
   pickups: Pickup[];
+  safeZones: SafeZone[];
 };
+
+function rectHitsCircle(o: Obstacle, z: SafeZone, pad = 0) {
+  const cx = Math.max(o.x, Math.min(z.x, o.x + o.w));
+  const cy = Math.max(o.y, Math.min(z.y, o.y + o.h));
+  const dx = z.x - cx;
+  const dy = z.y - cy;
+  return dx * dx + dy * dy < (z.r + pad) * (z.r + pad);
+}
+
+/** True when a point sits inside any respawn safe zone. */
+export function inSafeZone(world: World, x: number, y: number, pad = 0) {
+  return world.safeZones.some((z) => Math.hypot(x - z.x, y - z.y) < z.r + pad);
+}
 
 export function buildWorld(code: string, config: RoomConfig): World {
   const { w, h } = MAP_SIZES[config.size];
@@ -140,6 +156,19 @@ export function buildWorld(code: string, config: RoomConfig): World {
     }
   }
 
+  // Respawn safe zones — no attacks in or out, terrain cleared inside
+  const zoneR = Math.max(130, Math.min(230, Math.round(Math.min(w, h) * 0.1)));
+  const safeZones: SafeZone[] = [
+    [0.14, 0.16],
+    [0.86, 0.16],
+    [0.14, 0.84],
+    [0.86, 0.84],
+    [0.5, 0.5],
+  ].map(([fx, fy]) => ({ x: fx * w, y: fy * h, r: zoneR }));
+  for (let i = obstacles.length - 1; i >= 0; i--) {
+    if (safeZones.some((z) => rectHitsCircle(obstacles[i], z, 20))) obstacles.splice(i, 1);
+  }
+
   const pickups: Pickup[] = [];
   if (config.pickups) {
     const medkits = Math.round(10 * area) + 4;
@@ -148,7 +177,9 @@ export function buildWorld(code: string, config: RoomConfig): World {
       for (let t = 0; t < 40; t++) {
         const x = 60 + rng() * (w - 120);
         const y = 60 + rng() * (h - 120);
-        if (!pointInObstacles(obstacles, x, y, 30)) return { x, y };
+        if (pointInObstacles(obstacles, x, y, 30)) continue;
+        if (safeZones.some((z) => Math.hypot(x - z.x, y - z.y) < z.r + 40)) continue;
+        return { x, y };
       }
       return { x: 60 + rng() * (w - 120), y: 60 + rng() * (h - 120) };
     };
@@ -160,7 +191,7 @@ export function buildWorld(code: string, config: RoomConfig): World {
     }
   }
 
-  return { w, h, obstacles, pickups };
+  return { w, h, obstacles, pickups, safeZones };
 }
 
 export const PICKUP_R = 16;
@@ -212,8 +243,20 @@ export function pointInObstacles(obstacles: Obstacle[], x: number, y: number, pa
   return false;
 }
 
-/** A spawn point that isn't inside terrain. */
+/** A spawn point inside a respawn safe zone (falls back to open ground). */
 export function safeSpawn(world: World, rng: () => number = Math.random) {
+  const zones = world.safeZones ?? [];
+  if (zones.length) {
+    const z = zones[Math.floor(rng() * zones.length) % zones.length];
+    for (let i = 0; i < 30; i++) {
+      const a = rng() * Math.PI * 2;
+      const rad = Math.sqrt(rng()) * (z.r - 40);
+      const x = z.x + Math.cos(a) * rad;
+      const y = z.y + Math.sin(a) * rad;
+      if (!pointInObstacles(world.obstacles, x, y, 24)) return { x, y };
+    }
+    return { x: z.x, y: z.y };
+  }
   for (let i = 0; i < 60; i++) {
     const x = 80 + rng() * (world.w - 160);
     const y = 80 + rng() * (world.h - 160);
@@ -236,7 +279,15 @@ export function circleHitsObstacle(obstacles: Obstacle[], x: number, y: number, 
 
 /** A cluster of spawn points around one safe location — used for the bot squad. */
 export function groupSpawn(world: World, count: number, rng: () => number = Math.random) {
-  const centre = safeSpawn(world, rng);
+  let centre = { x: world.w / 2, y: world.h / 2 };
+  for (let i = 0; i < 80; i++) {
+    const x = 80 + rng() * (world.w - 160);
+    const y = 80 + rng() * (world.h - 160);
+    if (pointInObstacles(world.obstacles, x, y, 24)) continue;
+    if (inSafeZone(world, x, y, 220)) continue;
+    centre = { x, y };
+    break;
+  }
   const out: { x: number; y: number }[] = [];
   for (let i = 0; i < count; i++) {
     const ang = (i / Math.max(1, count)) * Math.PI * 2;
