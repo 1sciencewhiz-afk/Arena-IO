@@ -1000,6 +1000,15 @@ function RoomPage() {
           bot.y = Math.max(PLAYER_R, Math.min(world.h - PLAYER_R, bot.y));
           const bfix = resolveCircle(world.obstacles, bot.x, bot.y, PLAYER_R);
           bot.x = bfix.x; bot.y = bfix.y;
+          // Bots are pushed out of respawn safe zones
+          for (const z of world.safeZones) {
+            const d = Math.hypot(bot.x - z.x, bot.y - z.y);
+            if (d < z.r + PLAYER_R) {
+              const a = d < 0.001 ? Math.random() * Math.PI * 2 : Math.atan2(bot.y - z.y, bot.x - z.x);
+              bot.x = z.x + Math.cos(a) * (z.r + PLAYER_R);
+              bot.y = z.y + Math.sin(a) * (z.r + PLAYER_R);
+            }
+          }
         }
 
 
@@ -1600,6 +1609,29 @@ function RoomPage() {
         ctx.strokeStyle = "rgba(255,255,255,0.12)";
         ctx.lineWidth = 2;
         ctx.strokeRect(o.x, o.y, o.w, o.h);
+      }
+
+      // Respawn safe zones — softly pulsing translucent circles
+      for (const z of world.safeZones) {
+        if (z.x + z.r < cam.x || z.x - z.r > cam.x + VIEW_W) continue;
+        if (z.y + z.r < cam.y || z.y - z.r > cam.y + VIEW_H) continue;
+        const pulse = 0.5 + 0.5 * Math.sin(now / 900 + z.x * 0.01);
+        const r = z.r * (0.97 + pulse * 0.03);
+        const grad = ctx.createRadialGradient(z.x, z.y, r * 0.2, z.x, z.y, r);
+        grad.addColorStop(0, `rgba(125, 211, 252, ${0.06 + pulse * 0.05})`);
+        grad.addColorStop(1, "rgba(125, 211, 252, 0)");
+        ctx.fillStyle = grad;
+        ctx.beginPath(); ctx.arc(z.x, z.y, r, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = `rgba(125, 211, 252, ${0.22 + pulse * 0.25})`;
+        ctx.lineWidth = 3;
+        ctx.setLineDash([14, 12]);
+        ctx.beginPath(); ctx.arc(z.x, z.y, r, 0, Math.PI * 2); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = `rgba(186, 230, 253, ${0.35 + pulse * 0.25})`;
+        ctx.font = "600 15px ui-sans-serif, system-ui";
+        ctx.textAlign = "center";
+        ctx.fillText("SAFE ZONE", z.x, z.y - r + 24);
+        ctx.textAlign = "left";
       }
 
       // Pickups
