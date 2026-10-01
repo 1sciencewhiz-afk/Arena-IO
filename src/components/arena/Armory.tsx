@@ -37,68 +37,37 @@ export function Armory({ loadout, update, isGuest }: Props) {
     update({ killPoints: loadout.killPoints - cost, upgrades });
   };
 
+  const [pending, setPending] = useState<WeaponId | null>(null);
+  const carried = loadout.hotbar.slice(0, MAX_HOTBAR);
+
   const roll = () => {
-    if (loadout.killPoints < WEAPON_ROLL_COST) return;
-    const owned = new Set<WeaponId>([...loadout.inventory, ...loadout.storage]);
-    if (owned.size >= ALL_WEAPONS.length) {
-      // already own all (legitimate cap is 14 weapons total)
-    }
+    if (pending || loadout.killPoints < WEAPON_ROLL_COST) return;
     let pick: WeaponId = rollRandomWeapon();
     let guard = 0;
-    while (owned.has(pick) && guard++ < 40) pick = rollRandomWeapon();
-    const isNew = !owned.has(pick);
-
-    if (!isNew) {
-      // small partial refund handled by no-op + visible duplicate notice
+    while (carried.includes(pick) && guard++ < 40) pick = rollRandomWeapon();
+    if (carried.includes(pick)) {
       update({ killPoints: loadout.killPoints - 1 });
-      setFlash({ weapon: pick, isNew });
+      setFlash({ weapon: pick, isNew: false });
       setTimeout(() => setFlash(null), 2200);
       return;
     }
-
-    const inventory = [...loadout.inventory];
-    const storage = [...loadout.storage];
-    if (inventory.length < MAX_INVENTORY) inventory.push(pick);
-    else storage.push(pick);
-
-    update({
-      killPoints: loadout.killPoints - WEAPON_ROLL_COST,
-      inventory,
-      storage,
-    });
-    setFlash({ weapon: pick, isNew });
-    setTimeout(() => setFlash(null), 2400);
-  };
-
-  const toggleHotbar = (w: WeaponId) => {
-    if (!loadout.inventory.includes(w)) return;
-    let hotbar = [...loadout.hotbar];
-    if (hotbar.includes(w)) {
-      hotbar = hotbar.filter((x) => x !== w);
-      if (hotbar.length === 0) return; // need at least one
+    const killPoints = loadout.killPoints - WEAPON_ROLL_COST;
+    if (carried.length < MAX_HOTBAR) {
+      update({ killPoints, hotbar: [...carried, pick] });
+      setFlash({ weapon: pick, isNew: true });
+      setTimeout(() => setFlash(null), 2400);
     } else {
-      if (hotbar.length >= MAX_HOTBAR) hotbar = [...hotbar.slice(1), w];
-      else hotbar.push(w);
+      update({ killPoints });
+      setPending(pick);
     }
-    update({ hotbar });
   };
 
-  const moveToInventory = (w: WeaponId) => {
-    if (loadout.inventory.length >= MAX_INVENTORY) return;
-    update({
-      inventory: [...loadout.inventory, w],
-      storage: loadout.storage.filter((x) => x !== w),
-    });
-  };
-
-  const moveToStorage = (w: WeaponId) => {
-    if (loadout.inventory.length <= 1) return;
-    const hotbar = loadout.hotbar.filter((x) => x !== w);
-    update({
-      inventory: loadout.inventory.filter((x) => x !== w),
-      storage: [...loadout.storage, w],
-      hotbar: hotbar.length ? hotbar : [loadout.inventory.find((x) => x !== w) ?? "pistol"],
-    });
+  const replaceWith = (old: WeaponId) => {
+    if (!pending) return;
+    update({ hotbar: carried.map((x) => (x === old ? pending : x)) });
+    setFlash({ weapon: pending, isNew: true });
+    setTimeout(() => setFlash(null), 2400);
+    setPending(null);
   };
 
   const maxHpPreview = maxHp(loadout.upgrades || ZERO_UPGRADES);
@@ -152,7 +121,7 @@ export function Armory({ loadout, update, isGuest }: Props) {
         <div className="rounded-xl border border-foreground/10 bg-foreground/5 p-4">
           <h3 className="mb-2 text-xs uppercase tracking-wider text-foreground/60">Weapon Crate</h3>
           <p className="mb-3 text-[11px] text-foreground/50">
-            Roll for a random weapon. Rarer weapons drop less often. New weapons land in your inventory; if full, they go to storage.
+            Roll for a random weapon. Rarer weapons drop less often. You can carry 4 weapons; when full, pick one to replace.
           </p>
           <Button
             className="w-full"
@@ -178,99 +147,43 @@ export function Armory({ loadout, update, isGuest }: Props) {
         </div>
       </div>
 
-      {/* Inventory + hotbar */}
-      <div className="rounded-xl border border-foreground/10 bg-foreground/5 p-4">
-        <div className="mb-2 flex items-center justify-between">
-          <h3 className="text-xs uppercase tracking-wider text-foreground/60">
-            Inventory ({loadout.inventory.length}/{MAX_INVENTORY})
-          </h3>
-          <div className="text-[10px] text-foreground/50">
-            Hotbar {loadout.hotbar.length}/{MAX_HOTBAR} · click a weapon to add/remove from hotbar
+      {pending && (
+        <div className="rounded-xl border border-primary/50 bg-primary/10 p-4">
+          <div className="mb-2 text-sm font-bold">
+            You rolled <span style={{ color: RARITY_META[WEAPONS[pending].rarity].color }}>{WEAPONS[pending].name}</span> — pick a weapon to replace
           </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {carried.map((w) => (
+              <Button key={w} size="sm" variant="secondary" onClick={() => replaceWith(w)}>{WEAPONS[w].name}</Button>
+            ))}
+          </div>
+          <Button size="sm" variant="ghost" className="mt-2 w-full" onClick={() => setPending(null)}>
+            Discard {WEAPONS[pending].name}
+          </Button>
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-          {loadout.inventory.map((id) => {
+      )}
+
+      <div className="rounded-xl border border-foreground/10 bg-foreground/5 p-4">
+        <h3 className="mb-2 text-xs uppercase tracking-wider text-foreground/60">
+          Your weapons ({carried.length}/{MAX_HOTBAR})
+        </h3>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {carried.map((id, i) => {
             const w = WEAPONS[id];
-            const inBar = loadout.hotbar.includes(id);
-            const slot = loadout.hotbar.indexOf(id) + 1;
             return (
-              <div
-                key={id}
-                className={`rounded-lg border p-2 text-xs transition ${
-                  inBar ? "border-primary bg-primary/10" : "border-foreground/10 bg-background/40"
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <button onClick={() => toggleHotbar(id)} className="text-left font-bold">
-                    {w.name}
-                  </button>
-                  {inBar && (
-                    <span className="rounded bg-primary px-1.5 py-0.5 font-mono text-[10px] text-primary-foreground">
-                      {slot}
-                    </span>
-                  )}
+              <div key={id} className="rounded-lg border border-primary bg-primary/10 p-2 text-xs">
+                <div className="flex items-center justify-between font-bold">
+                  {w.name}
+                  <span className="rounded bg-primary px-1.5 font-mono text-[10px] text-primary-foreground">{i + 1}</span>
                 </div>
                 <div className="text-[10px]" style={{ color: RARITY_META[w.rarity].color }}>
                   {RARITY_META[w.rarity].label} · {Math.round(w.dmg)} dmg
-                </div>
-                <div className="mt-1 flex gap-1">
-                  <button
-                    onClick={() => toggleHotbar(id)}
-                    className="flex-1 rounded bg-foreground/10 px-1.5 py-0.5 text-[10px] hover:bg-foreground/20"
-                  >
-                    {inBar ? "Unequip" : "Equip"}
-                  </button>
-                  {id !== "pistol" && (
-                    <button
-                      onClick={() => moveToStorage(id)}
-                      className="rounded bg-foreground/10 px-1.5 py-0.5 text-[10px] hover:bg-foreground/20"
-                      title="Move to storage"
-                    >
-                      📦
-                    </button>
-                  )}
                 </div>
               </div>
             );
           })}
         </div>
       </div>
-
-      {/* Storage */}
-      {loadout.storage.length > 0 && (
-        <div className="rounded-xl border border-foreground/10 bg-foreground/5 p-4">
-          <h3 className="mb-2 text-xs uppercase tracking-wider text-foreground/60">
-            Storage ({loadout.storage.length}) · unlimited
-          </h3>
-          <p className="mb-2 text-[11px] text-foreground/50">
-            Weapons not currently in your inventory. Move into inventory to equip.
-          </p>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-            {loadout.storage.map((id) => {
-              const w = WEAPONS[id];
-              const canMove = loadout.inventory.length < MAX_INVENTORY;
-              return (
-                <div
-                  key={id}
-                  className="rounded-lg border border-foreground/10 bg-background/30 p-2 text-xs"
-                >
-                  <div className="font-bold">{w.name}</div>
-                  <div className="text-[10px]" style={{ color: RARITY_META[w.rarity].color }}>
-                    {RARITY_META[w.rarity].label}
-                  </div>
-                  <button
-                    onClick={() => moveToInventory(id)}
-                    disabled={!canMove}
-                    className="mt-1 w-full rounded bg-foreground/10 px-1.5 py-0.5 text-[10px] hover:bg-foreground/20 disabled:opacity-40"
-                  >
-                    {canMove ? "→ Inventory" : "Full"}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {isGuest && (
         <p className="text-center text-[11px] text-foreground/50">
