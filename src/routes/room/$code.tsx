@@ -7,7 +7,7 @@ import { announceRoom } from "@/lib/arena/lobby";
 import { TouchControls } from "@/components/arena/TouchControls";
 import { HowToPlayContent } from "@/components/arena/HowToPlayContent";
 import { useAuthUser, useProfile, useIsAdmin } from "@/lib/arena/auth";
-import { useLoadout } from "@/lib/arena/loadout";
+import { useLoadout, type Loadout } from "@/lib/arena/loadout";
 import {
   WEAPONS,
   WEAPON_ORDER,

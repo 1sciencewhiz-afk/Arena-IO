@@ -42,7 +42,7 @@ function readGuest(): Loadout {
       upgrades: { ...def.upgrades, ...(j.upgrades ?? {}) },
       inventory: Array.isArray(j.inventory) ? j.inventory.filter(isWeaponId) : def.inventory,
       storage: Array.isArray(j.storage) ? j.storage.filter(isWeaponId) : def.storage,
-      hotbar: Array.isArray(j.hotbar) ? j.hotbar.filter(isWeaponId) : def.hotbar,
+      hotbar: (Array.isArray(j.hotbar) ? j.hotbar.filter(isWeaponId) : def.hotbar).slice(0, MAX_HOTBAR),
     };
   } catch {
     return defaultLoadout();
@@ -67,9 +67,9 @@ export function useLoadout(userId: string | null) {
       return {
         killPoints: profile.kill_points,
         upgrades: profile.upgrades,
-        inventory: profile.inventory,
-        storage: profile.storage_weapons,
-        hotbar: profile.hotbar,
+        inventory: profile.hotbar.slice(0, MAX_HOTBAR),
+        storage: [],
+        hotbar: profile.hotbar.slice(0, MAX_HOTBAR),
       };
     }
     return guest;
@@ -80,8 +80,10 @@ export function useLoadout(userId: string | null) {
   const update = async (patch: Partial<Loadout>) => {
     const next: Loadout = { ...loadout, ...patch };
     // Enforce invariants
-    next.inventory = next.inventory.slice(0, MAX_INVENTORY); // storage is unlimited
-    next.hotbar = next.hotbar.filter((w) => next.inventory.includes(w)).slice(0, MAX_HOTBAR);
+    // Players carry only their hotbar (max 4 weapons); no storage.
+    next.hotbar = next.hotbar.filter((w, i, a) => a.indexOf(w) === i).slice(0, MAX_HOTBAR);
+    next.inventory = [...next.hotbar].slice(0, MAX_INVENTORY);
+    next.storage = [];
     if (next.hotbar.length === 0 && next.inventory.length > 0) {
       next.hotbar = [next.inventory[0]];
     }
