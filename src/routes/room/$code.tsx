@@ -271,9 +271,10 @@ function RoomPage() {
     const self = playersRef.current.get(meRef.current.id);
     if (self) {
       self.upgrades = { ...loadout.upgrades };
-      const newMax = maxHp(loadout.upgrades);
+      const newMax = isAdminRef.current ? ADMIN_HP : maxHp(loadout.upgrades);
       if (newMax !== self.maxHp) {
-        self.hp = Math.min(self.hp, newMax);
+        // Raising max HP (e.g. profile finished loading) tops the player up to full
+        self.hp = newMax > self.maxHp ? newMax : Math.min(self.hp, newMax);
         self.maxHp = newMax;
         setHpUi({ hp: self.hp, max: self.maxHp });
       }
@@ -443,7 +444,7 @@ function RoomPage() {
           id: string; x: number; y: number; hp: number; maxHp: number; name: string;
           kills: number; color: string; upgrades: Upgrades; aim?: number;
         };
-        if (!p || typeof p.id !== "string") return;
+        if (!p || typeof p.id !== "string" || p.id === me.id) return;
         const safeMaxHp = clampNum(p.maxHp, 1, 99999, 100);
         const safeHp = clampNum(p.hp, 0, safeMaxHp, safeMaxHp);
         const safeKills = clampNum(p.kills, 0, 100000, 0);
@@ -1305,8 +1306,10 @@ function RoomPage() {
         // Admin: high but finite health pool
         if (isAdminRef.current) {
           if (self.maxHp !== ADMIN_HP) {
+            if (ADMIN_HP > self.maxHp) self.hp = ADMIN_HP;
             self.maxHp = ADMIN_HP;
             self.hp = Math.min(self.hp, ADMIN_HP);
+            setHpUi({ hp: self.hp, max: self.maxHp });
           }
         }
 
@@ -1352,14 +1355,17 @@ function RoomPage() {
             setHpUi({ hp: self.hp, max: self.maxHp });
           } else {
             const w = randomLootWeapon();
-            weaponRef.current = w;
-            chargeStartRef.current = null;
-            setWeaponUi(w);
-            if (!hotbarRef.current.includes(w)) {
-              hotbarRef.current = [w, ...hotbarRef.current].slice(0, 4);
+            if (hotbarRef.current.includes(w)) {
+              setLootMsg(`${WEAPONS[w].name} — already carried`);
+              window.setTimeout(() => setLootMsg(null), 1800);
+            } else if (hotbarRef.current.length < 4) {
+              hotbarRef.current = [...hotbarRef.current, w];
+              void updateLoadout({ inventory: [...hotbarRef.current], hotbar: [...hotbarRef.current] });
+              setLootMsg(`Picked up ${WEAPONS[w].name}!`);
+              window.setTimeout(() => setLootMsg(null), 1800);
+            } else {
+              setLootPick(w);
             }
-            setLootMsg(`Picked up ${WEAPONS[w].name}!`);
-            window.setTimeout(() => setLootMsg(null), 1800);
           }
         }
       }
