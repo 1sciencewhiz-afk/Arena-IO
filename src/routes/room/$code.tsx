@@ -150,6 +150,7 @@ function RoomPage() {
   const [showScoreboard, setShowScoreboard] = useState(false);
   const [lootMsg, setLootMsg] = useState<string | null>(null);
   const [lootPick, setLootPick] = useState<WeaponId | null>(null);
+  const updateLoadoutRef = useRef<(p: Partial<Loadout>) => unknown>(() => {});
   // Hydrate room name client-side to avoid SSR mismatch
   const [roomName, setRoomName] = useState<string>(code);
   const [config, setConfig] = useState<RoomConfig>(code === "PUBLIC" ? PUBLIC_CONFIG : DEFAULT_CONFIG);
@@ -257,6 +258,7 @@ function RoomPage() {
     selectWeapon: (w: WeaponId) => void;
   } | null>(null);
 
+  updateLoadoutRef.current = updateLoadout;
   // Apply loadout to self when it loads / changes
   useEffect(() => {
     if (!loadout) return;
@@ -1361,7 +1363,7 @@ function RoomPage() {
               window.setTimeout(() => setLootMsg(null), 1800);
             } else if (hotbarRef.current.length < 4) {
               hotbarRef.current = [...hotbarRef.current, w];
-              void updateLoadout({ inventory: [...hotbarRef.current], hotbar: [...hotbarRef.current] });
+              void updateLoadoutRef.current({ inventory: [...hotbarRef.current], hotbar: [...hotbarRef.current] });
               setLootMsg(`Picked up ${WEAPONS[w].name}!`);
               window.setTimeout(() => setLootMsg(null), 1800);
             } else {
