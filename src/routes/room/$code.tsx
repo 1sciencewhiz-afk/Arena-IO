@@ -149,6 +149,7 @@ function RoomPage() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showScoreboard, setShowScoreboard] = useState(false);
   const [lootMsg, setLootMsg] = useState<string | null>(null);
+  const [lootPick, setLootPick] = useState<WeaponId | null>(null);
   // Hydrate room name client-side to avoid SSR mismatch
   const [roomName, setRoomName] = useState<string>(code);
   const [config, setConfig] = useState<RoomConfig>(code === "PUBLIC" ? PUBLIC_CONFIG : DEFAULT_CONFIG);
@@ -1884,6 +1885,33 @@ function RoomPage() {
               {lootMsg && (
                 <div className="pointer-events-none absolute left-1/2 top-4 z-20 -translate-x-1/2 rounded-lg bg-primary/90 px-3 py-1.5 text-xs font-bold text-primary-foreground shadow-lg">
                   {lootMsg}
+                </div>
+              )}
+              {lootPick && (
+                <div className="absolute left-1/2 top-4 z-30 w-[min(92%,360px)] -translate-x-1/2 rounded-xl border border-primary/40 bg-background/95 p-3 text-xs shadow-2xl">
+                  <div className="mb-2 font-bold">
+                    Found {WEAPONS[lootPick].name} — pick a weapon to replace
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {hotbarRef.current.map((w) => (
+                      <button
+                        key={w}
+                        className="rounded bg-foreground/10 px-2 py-1.5 hover:bg-foreground/20"
+                        onClick={() => {
+                          const next = hotbarRef.current.map((x) => (x === w ? lootPick : x));
+                          hotbarRef.current = next;
+                          if (weaponRef.current === w) { weaponRef.current = lootPick; setWeaponUi(lootPick); }
+                          void updateLoadout({ inventory: [...next], hotbar: [...next] });
+                          setLootPick(null);
+                        }}
+                      >
+                        {WEAPONS[w].name}
+                      </button>
+                    ))}
+                  </div>
+                  <button className="mt-2 w-full rounded bg-foreground/5 px-2 py-1 text-foreground/60" onClick={() => setLootPick(null)}>
+                    Discard {WEAPONS[lootPick].name}
+                  </button>
                 </div>
               )}
               <canvas
