@@ -7,7 +7,7 @@ import { announceRoom } from "@/lib/arena/lobby";
 import { TouchControls } from "@/components/arena/TouchControls";
 import { HowToPlayContent } from "@/components/arena/HowToPlayContent";
 import { useAuthUser, useProfile, useIsAdmin } from "@/lib/arena/auth";
-import { useLoadout } from "@/lib/arena/loadout";
+import { useLoadout, type Loadout } from "@/lib/arena/loadout";
 import {
   WEAPONS,
   WEAPON_ORDER,
@@ -149,6 +149,8 @@ function RoomPage() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showScoreboard, setShowScoreboard] = useState(false);
   const [lootMsg, setLootMsg] = useState<string | null>(null);
+  const [lootPick, setLootPick] = useState<WeaponId | null>(null);
+  const updateLoadoutRef = useRef<(p: Partial<Loadout>) => unknown>(() => {});
   // Hydrate room name client-side to avoid SSR mismatch
   const [roomName, setRoomName] = useState<string>(code);
   const [config, setConfig] = useState<RoomConfig>(code === "PUBLIC" ? PUBLIC_CONFIG : DEFAULT_CONFIG);
@@ -256,6 +258,7 @@ function RoomPage() {
     selectWeapon: (w: WeaponId) => void;
   } | null>(null);
 
+  updateLoadoutRef.current = updateLoadout;
   // Apply loadout to self when it loads / changes
   useEffect(() => {
     if (!loadout) return;
@@ -271,9 +274,10 @@ function RoomPage() {
     const self = playersRef.current.get(meRef.current.id);
     if (self) {
       self.upgrades = { ...loadout.upgrades };
-      const newMax = maxHp(loadout.upgrades);
+      const newMax = isAdminRef.current ? ADMIN_HP : maxHp(loadout.upgrades);
       if (newMax !== self.maxHp) {
-        self.hp = Math.min(self.hp, newMax);
+        // Raising max HP (e.g. profile finished loading) tops the player up to full
+        self.hp = newMax > self.maxHp ? newMax : Math.min(self.hp, newMax);
         self.maxHp = newMax;
         setHpUi({ hp: self.hp, max: self.maxHp });
       }
@@ -443,7 +447,7 @@ function RoomPage() {
           id: string; x: number; y: number; hp: number; maxHp: number; name: string;
           kills: number; color: string; upgrades: Upgrades; aim?: number;
         };
-        if (!p || typeof p.id !== "string") return;
+        if (!p || typeof p.id !== "string" || p.id === me.id) return;
         const safeMaxHp = clampNum(p.maxHp, 1, 99999, 100);
         const safeHp = clampNum(p.hp, 0, safeMaxHp, safeMaxHp);
         const safeKills = clampNum(p.kills, 0, 100000, 0);
@@ -1305,8 +1309,10 @@ function RoomPage() {
         // Admin: high but finite health pool
         if (isAdminRef.current) {
           if (self.maxHp !== ADMIN_HP) {
+            if (ADMIN_HP > self.maxHp) self.hp = ADMIN_HP;
             self.maxHp = ADMIN_HP;
             self.hp = Math.min(self.hp, ADMIN_HP);
+            setHpUi({ hp: self.hp, max: self.maxHp });
           }
         }
 
@@ -1352,14 +1358,17 @@ function RoomPage() {
             setHpUi({ hp: self.hp, max: self.maxHp });
           } else {
             const w = randomLootWeapon();
-            weaponRef.current = w;
-            chargeStartRef.current = null;
-            setWeaponUi(w);
-            if (!hotbarRef.current.includes(w)) {
-              hotbarRef.current = [w, ...hotbarRef.current].slice(0, 4);
+            if (hotbarRef.current.includes(w)) {
+              setLootMsg(`${WEAPONS[w].name} — already carried`);
+              window.setTimeout(() => setLootMsg(null), 1800);
+            } else if (hotbarRef.current.length < 4) {
+              hotbarRef.current = [...hotbarRef.current, w];
+              void updateLoadoutRef.current({ inventory: [...hotbarRef.current], hotbar: [...hotbarRef.current] });
+              setLootMsg(`Picked up ${WEAPONS[w].name}!`);
+              window.setTimeout(() => setLootMsg(null), 1800);
+            } else {
+              setLootPick(w);
             }
-            setLootMsg(`Picked up ${WEAPONS[w].name}!`);
-            window.setTimeout(() => setLootMsg(null), 1800);
           }
         }
       }
@@ -1878,6 +1887,33 @@ function RoomPage() {
               {lootMsg && (
                 <div className="pointer-events-none absolute left-1/2 top-4 z-20 -translate-x-1/2 rounded-lg bg-primary/90 px-3 py-1.5 text-xs font-bold text-primary-foreground shadow-lg">
                   {lootMsg}
+                </div>
+              )}
+              {lootPick && (
+                <div className="absolute left-1/2 top-4 z-30 w-[min(92%,360px)] -translate-x-1/2 rounded-xl border border-primary/40 bg-background/95 p-3 text-xs shadow-2xl">
+                  <div className="mb-2 font-bold">
+                    Found {WEAPONS[lootPick].name} — pick a weapon to replace
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {hotbarRef.current.map((w) => (
+                      <button
+                        key={w}
+                        className="rounded bg-foreground/10 px-2 py-1.5 hover:bg-foreground/20"
+                        onClick={() => {
+                          const next = hotbarRef.current.map((x) => (x === w ? lootPick : x));
+                          hotbarRef.current = next;
+                          if (weaponRef.current === w) { weaponRef.current = lootPick; setWeaponUi(lootPick); }
+                          void updateLoadout({ inventory: [...next], hotbar: [...next] });
+                          setLootPick(null);
+                        }}
+                      >
+                        {WEAPONS[w].name}
+                      </button>
+                    ))}
+                  </div>
+                  <button className="mt-2 w-full rounded bg-foreground/5 px-2 py-1 text-foreground/60" onClick={() => setLootPick(null)}>
+                    Discard {WEAPONS[lootPick].name}
+                  </button>
                 </div>
               )}
               <canvas
