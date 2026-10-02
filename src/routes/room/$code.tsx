@@ -110,7 +110,8 @@ type Projectile = {
   seek?: number;         // summoned units: current heading
   stuckAt?: number;      // summoned units: last time they got wedged
   nextShotAt?: number;   // summoned units: next pistol shot time
-  unitHp?: number;       // summoned units: personal health
+  unitHp?: number;
+  ricocheted?: boolean;       // summoned units: personal health
   unitMaxHp?: number;
 
 };
@@ -373,7 +374,8 @@ function RoomPage() {
       if (inSafeZone(world, t.x, t.y)) return;
       const attacker = playersRef.current.get(byId);
       if (attacker && inSafeZone(world, attacker.x, attacker.y)) return;
-      t.hp = Math.max(0, t.hp - dmg * damageTakenMult(t.upgrades));
+      const modeMult = config.mode === "glass" ? 3 : 1;
+      t.hp = Math.max(0, t.hp - dmg * modeMult * damageTakenMult(t.upgrades));
       if (immobilizeMs && targetId === me.id) {
         t.immobilizedUntil = Math.max(t.immobilizedUntil, performance.now() + immobilizeMs);
       } else if (immobilizeMs) {
@@ -807,8 +809,6 @@ function RoomPage() {
         const py = b.vx / sp;
         const lateral = dx * px + dy * py;
         if (Math.abs(lateral) > PLAYER_R + b.radius + 26) continue;
-        // A wall between the shot and the bot means it is never arriving
-        if (!losClear(b.x, b.y, bot.x, bot.y, Math.max(4, b.radius))) continue;
         const side = lateral >= 0 ? 1 : -1;
         return Math.atan2(py * side, px * side);
       }
@@ -1237,6 +1237,14 @@ function RoomPage() {
           const fix = resolveCircle(world.obstacles, b.x, b.y, b.radius + 1);
           b.x = fix.x; b.y = fix.y;
           b.bouncesLeft -= 1;
+          continue;
+        }
+        // 20% of blocked shots ricochet back at 40% damage
+        if (!b.ricocheted && Math.random() < 0.2) {
+          b.vx = -b.vx; b.vy = -b.vy; b.dmg *= 0.4; b.ricocheted = true; b.owner = "ricochet";
+          const fix = resolveCircle(world.obstacles, b.x, b.y, b.radius + 1);
+          b.x = fix.x; b.y = fix.y;
+          boomsRef.current.push({ x: b.x, y: b.y, r: 8, born: now, color: "#fde68a" });
           continue;
         }
         if (b.splash) explode(b);
