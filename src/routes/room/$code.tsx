@@ -110,7 +110,8 @@ type Projectile = {
   seek?: number;         // summoned units: current heading
   stuckAt?: number;      // summoned units: last time they got wedged
   nextShotAt?: number;   // summoned units: next pistol shot time
-  unitHp?: number;       // summoned units: personal health
+  unitHp?: number;
+  ricocheted?: boolean;       // summoned units: personal health
   unitMaxHp?: number;
 
 };
@@ -141,6 +142,17 @@ function RoomPage() {
   const [connected, setConnected] = useState(false);
   const [scoreboard, setScoreboard] = useState<Player[]>([]);
   const [copied, setCopied] = useState(false);
+  const roundWinner = scoreboard.find((p) => p.kills >= 10) ?? null;
+  const roundWinnerId = roundWinner?.id;
+  useEffect(() => {
+    if (config.mode !== "first10" || !roundWinnerId) return;
+    const t = window.setTimeout(() => {
+      for (const p of playersRef.current.values()) p.kills = 0;
+      setScoreboard(Array.from(playersRef.current.values()));
+    }, 5000);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roundWinnerId]);
   const [weaponUi, setWeaponUi] = useState<WeaponId>("pistol");
   const [hpUi, setHpUi] = useState({ hp: 100, max: 100 });
   const [matchKills, setMatchKills] = useState(0);
@@ -373,7 +385,8 @@ function RoomPage() {
       if (inSafeZone(world, t.x, t.y)) return;
       const attacker = playersRef.current.get(byId);
       if (attacker && inSafeZone(world, attacker.x, attacker.y)) return;
-      t.hp = Math.max(0, t.hp - dmg * damageTakenMult(t.upgrades));
+      const modeMult = config.mode === "glass" ? 3 : 1;
+      t.hp = Math.max(0, t.hp - dmg * modeMult * damageTakenMult(t.upgrades));
       if (immobilizeMs && targetId === me.id) {
         t.immobilizedUntil = Math.max(t.immobilizedUntil, performance.now() + immobilizeMs);
       } else if (immobilizeMs) {
@@ -807,8 +820,6 @@ function RoomPage() {
         const py = b.vx / sp;
         const lateral = dx * px + dy * py;
         if (Math.abs(lateral) > PLAYER_R + b.radius + 26) continue;
-        // A wall between the shot and the bot means it is never arriving
-        if (!losClear(b.x, b.y, bot.x, bot.y, Math.max(4, b.radius))) continue;
         const side = lateral >= 0 ? 1 : -1;
         return Math.atan2(py * side, px * side);
       }
@@ -1237,6 +1248,14 @@ function RoomPage() {
           const fix = resolveCircle(world.obstacles, b.x, b.y, b.radius + 1);
           b.x = fix.x; b.y = fix.y;
           b.bouncesLeft -= 1;
+          continue;
+        }
+        // 20% of blocked shots ricochet back at 40% damage
+        if (!b.ricocheted && Math.random() < 0.2) {
+          b.vx = -b.vx; b.vy = -b.vy; b.dmg *= 0.4; b.ricocheted = true; b.owner = "ricochet";
+          const fix = resolveCircle(world.obstacles, b.x, b.y, b.radius + 1);
+          b.x = fix.x; b.y = fix.y;
+          boomsRef.current.push({ x: b.x, y: b.y, r: 8, born: now, color: "#fde68a" });
           continue;
         }
         if (b.splash) explode(b);
@@ -1884,6 +1903,13 @@ function RoomPage() {
         <div className={isTouch ? "flex min-h-0 flex-1" : "grid gap-4 lg:grid-cols-[1fr_260px]"}>
           <div className={isTouch ? "flex min-h-0 flex-1 items-center justify-center" : "space-y-3"}>
             <div className={`relative overflow-hidden ${isTouch ? "h-full w-full" : "rounded-xl border border-foreground/10 bg-black shadow-2xl"}`}>
+              {config.mode === "first10" && roundWinner && (
+                <div className="pointer-events-none absolute inset-x-0 top-1/3 z-30 text-center">
+                  <div className="inline-block rounded-xl bg-background/90 px-5 py-3 text-lg font-bold text-primary shadow-2xl">
+                    🏆 {roundWinner.name} wins the round! New round starting…
+                  </div>
+                </div>
+              )}
               {lootMsg && (
                 <div className="pointer-events-none absolute left-1/2 top-4 z-20 -translate-x-1/2 rounded-lg bg-primary/90 px-3 py-1.5 text-xs font-bold text-primary-foreground shadow-lg">
                   {lootMsg}

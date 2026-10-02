@@ -8,7 +8,15 @@ export type RoomConfig = {
   terrain: TerrainId;
   size: MapSizeId;
   pickups: boolean;
+  mode: GameModeId;
 };
+
+export type GameModeId = "classic" | "first10" | "glass";
+export const GAME_MODES: { id: GameModeId; label: string; desc: string }[] = [
+  { id: "classic", label: "Classic", desc: "Endless free-for-all" },
+  { id: "first10", label: "First to 10", desc: "First to 10 kills wins the round" },
+  { id: "glass",   label: "Glass Cannon", desc: "All damage is tripled" },
+];
 
 export const MAP_SIZES: Record<MapSizeId, { w: number; h: number; label: string }> = {
   small:   { w: 1200, h: 700,  label: "Small" },
@@ -29,6 +37,7 @@ export const DEFAULT_CONFIG: RoomConfig = {
   terrain: "blocks",
   size: "medium",
   pickups: true,
+  mode: "classic",
 };
 
 export const PUBLIC_CONFIG: RoomConfig = {
@@ -36,18 +45,20 @@ export const PUBLIC_CONFIG: RoomConfig = {
   terrain: "blocks",
   size: "massive",
   pickups: true,
+  mode: "classic",
 };
 
 /** Compact URL encoding, e.g. "b1-blocks-massive-p1". */
 export function encodeConfig(c: RoomConfig): string {
-  return `b${c.bots ? 1 : 0}-${c.terrain}-${c.size}-p${c.pickups ? 1 : 0}`;
+  return `b${c.bots ? 1 : 0}-${c.terrain}-${c.size}-p${c.pickups ? 1 : 0}-${c.mode ?? "classic"}`;
 }
 
 export function decodeConfig(raw: string | null | undefined): RoomConfig | null {
   if (!raw) return null;
   const parts = raw.split("-");
-  if (parts.length !== 4) return null;
-  const [b, terrain, size, p] = parts;
+  if (parts.length !== 4 && parts.length !== 5) return null;
+  const [b, terrain, size, p, m] = parts;
+  const mode: GameModeId = m === "first10" || m === "glass" ? m : "classic";
   if (!(terrain in { open: 1, blocks: 1, pillars: 1, maze: 1 })) return null;
   if (!(size in MAP_SIZES)) return null;
   return {
@@ -55,6 +66,7 @@ export function decodeConfig(raw: string | null | undefined): RoomConfig | null 
     terrain: terrain as TerrainId,
     size: size as MapSizeId,
     pickups: p === "p1",
+    mode,
   };
 }
 

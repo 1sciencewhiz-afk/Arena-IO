@@ -7,6 +7,7 @@ import {
   DEFAULT_CONFIG,
   MAP_SIZES,
   TERRAINS,
+  GAME_MODES,
   encodeConfig,
   type MapSizeId,
   type RoomConfig,
@@ -224,6 +225,25 @@ function Index() {
                       }`}
                     >
                       {MAP_SIZES[s].label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-1 text-[11px] text-foreground/60">Game mode</div>
+                <div className="grid grid-cols-3 gap-2">
+                  {GAME_MODES.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      title={m.desc}
+                      onClick={() => setCfg({ ...cfg, mode: m.id })}
+                      className={`rounded-lg border px-2 py-1.5 text-xs font-semibold transition ${
+                        (cfg.mode ?? "classic") === m.id ? "border-primary bg-primary/20" : "border-foreground/10 text-foreground/50"
+                      }`}
+                    >
+                      {m.label}
                     </button>
                   ))}
                 </div>
