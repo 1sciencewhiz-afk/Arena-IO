@@ -142,6 +142,17 @@ function RoomPage() {
   const [connected, setConnected] = useState(false);
   const [scoreboard, setScoreboard] = useState<Player[]>([]);
   const [copied, setCopied] = useState(false);
+  const roundWinner = scoreboard.find((p) => p.kills >= 10) ?? null;
+  const roundWinnerId = roundWinner?.id;
+  useEffect(() => {
+    if (config.mode !== "first10" || !roundWinnerId) return;
+    const t = window.setTimeout(() => {
+      for (const p of playersRef.current.values()) p.kills = 0;
+      setScoreboard(Array.from(playersRef.current.values()));
+    }, 5000);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roundWinnerId]);
   const [weaponUi, setWeaponUi] = useState<WeaponId>("pistol");
   const [hpUi, setHpUi] = useState({ hp: 100, max: 100 });
   const [matchKills, setMatchKills] = useState(0);
@@ -1892,6 +1903,13 @@ function RoomPage() {
         <div className={isTouch ? "flex min-h-0 flex-1" : "grid gap-4 lg:grid-cols-[1fr_260px]"}>
           <div className={isTouch ? "flex min-h-0 flex-1 items-center justify-center" : "space-y-3"}>
             <div className={`relative overflow-hidden ${isTouch ? "h-full w-full" : "rounded-xl border border-foreground/10 bg-black shadow-2xl"}`}>
+              {config.mode === "first10" && roundWinner && (
+                <div className="pointer-events-none absolute inset-x-0 top-1/3 z-30 text-center">
+                  <div className="inline-block rounded-xl bg-background/90 px-5 py-3 text-lg font-bold text-primary shadow-2xl">
+                    🏆 {roundWinner.name} wins the round! New round starting…
+                  </div>
+                </div>
+              )}
               {lootMsg && (
                 <div className="pointer-events-none absolute left-1/2 top-4 z-20 -translate-x-1/2 rounded-lg bg-primary/90 px-3 py-1.5 text-xs font-bold text-primary-foreground shadow-lg">
                   {lootMsg}
