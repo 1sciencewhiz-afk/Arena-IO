@@ -369,11 +369,16 @@ function RoomPage() {
       );
     }
 
+    function summonHp(owner: string) {
+      const o = playersRef.current.get(owner);
+      return Math.max(10, Math.round((o?.maxHp ?? 100) * 0.5));
+    }
     function spawnProjectile(p: Projectile) {
-      // Summoned units are little soldiers: give each one its own health bar
+      // Summoned units get ~50% of their summoner's max health
       if (WEAPONS[p.weapon]?.summon && p.unitHp == null) {
-        p.unitMaxHp = 14;
-        p.unitHp = 14;
+        const hp = summonHp(p.owner);
+        p.unitMaxHp = hp;
+        p.unitHp = hp;
       }
       projectilesRef.current.push(p);
     }
@@ -503,7 +508,7 @@ function RoomPage() {
           const maxDmg = wDef.dmg * 3;
           const safeDmg = Math.max(0, Math.min(Number(pr.dmg) || 0, maxDmg));
           const rp: Projectile = { ...pr, dmg: safeDmg, hitSet: undefined };
-          if (wDef.summon && rp.unitHp == null) { rp.unitMaxHp = 14; rp.unitHp = 14; }
+          if (wDef.summon) { const hp = summonHp(rp.owner); rp.unitMaxHp = hp; rp.unitHp = hp; }
           projectilesRef.current.push(rp);
         }
       })
