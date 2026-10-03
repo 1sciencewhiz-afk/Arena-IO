@@ -8,7 +8,8 @@ export type WeaponId =
   | "revolver" | "autoshotgun" | "grenade_launcher" | "cluster_bomb"
   | "freeze_ray" | "poison_dart" | "lightning" | "blackhole"
   | "turret" | "drone_swarm" | "javelin" | "bazooka"
-  | "icicle" | "acid_spitter" | "gauss_rifle";
+  | "icicle" | "acid_spitter" | "gauss_rifle"
+  | "heal_beacon" | "smoke_grenade";
 
 
 export type Rarity = "common" | "rare" | "epic" | "legendary";
@@ -40,6 +41,7 @@ export type WeaponDef = {
   immobilize?: number; // ms freeze on hit
   twin?: boolean; // dual barrels
   summon?: number; // mini soldier count
+  gear?: "heal" | "smoke"; // utility item, no damage
   rarity: Rarity;
 };
 
@@ -87,6 +89,8 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
   icicle:           { id: "icicle",           name: "Icicle Launcher",  cooldown: 0.8,  dmg: 12, speed: 640, lifetime: 1100, radius: 4, pellets: 3, spread: 0.3, immobilize: 500, rarity: "rare" },
   acid_spitter:     { id: "acid_spitter",     name: "Acid Spitter",     cooldown: 0.65, dmg: 13, speed: 430, lifetime: 900, radius: 5, pellets: 2, spread: 0.25, splash: 28, rarity: "rare" },
   gauss_rifle:      { id: "gauss_rifle",      name: "Gauss Rifle",      cooldown: 1.4,  dmg: 52, speed: 1300, lifetime: 1500, radius: 3, charge: 0.5, pierce: true, rarity: "legendary" },
+  heal_beacon:      { id: "heal_beacon",      name: "Healing Beacon",   cooldown: 12,   dmg: 0,  speed: 0, lifetime: 8000, radius: 90, gear: "heal", rarity: "epic" },
+  smoke_grenade:    { id: "smoke_grenade",    name: "Smoke Grenade",    cooldown: 6,    dmg: 0,  speed: 0, lifetime: 7000, radius: 130, gear: "smoke", rarity: "rare" },
 };
 
 export const WEAPON_ORDER: WeaponId[] = [
@@ -100,6 +104,7 @@ export const WEAPON_ORDER: WeaponId[] = [
   "freeze_ray", "poison_dart", "lightning", "blackhole",
   "turret", "drone_swarm", "javelin", "bazooka",
   "icicle", "acid_spitter", "gauss_rifle",
+  "heal_beacon", "smoke_grenade",
 ];
 
 export const ALL_WEAPONS = WEAPON_ORDER;
