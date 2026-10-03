@@ -224,6 +224,9 @@ function RoomPage() {
   const loadoutAppliedRef = useRef(false);
   const startKillPointsRef = useRef(0);
   const matchKillsRef = useRef(0);
+  const streakRef = useRef(0);
+  const buffRef = useRef({ speedUntil: 0, dmgUntil: 0 });
+  const gearRef = useRef<{ kind: "heal" | "smoke"; x: number; y: number; r: number; born: number; life: number; owner: string }[]>([]);
 
   // Game state in refs
   const playersRef = useRef<Map<string, Player>>(new Map());
@@ -403,8 +406,22 @@ function RoomPage() {
         if (byId === me.id) {
           matchKillsRef.current += 1;
           setMatchKills(matchKillsRef.current);
+          // Killstreak rewards
+          streakRef.current += 1;
+          const st = streakRef.current;
+          const nowMs = performance.now();
+          let perk: string | null = null;
+          if (st === 3) { buffRef.current.speedUntil = nowMs + 8000; perk = "3 kill streak — Speed Boost!"; }
+          else if (st === 5) {
+            const me2 = playersRef.current.get(me.id);
+            if (me2) { me2.hp = me2.maxHp; setHpUi({ hp: me2.hp, max: me2.maxHp }); }
+            perk = "5 kill streak — Full Heal!";
+          } else if (st === 7 || (st > 7 && st % 5 === 0)) { buffRef.current.dmgUntil = nowMs + 10000; perk = `${st} kill streak — Double Damage!`; }
+          if (perk) { setLootMsg(perk); window.setTimeout(() => setLootMsg(null), 2200); }
         }
         if (targetId === me.id) {
+          streakRef.current = 0;
+          buffRef.current = { speedUntil: 0, dmgUntil: 0 };
           setTimeout(() => {
             const self = playersRef.current.get(me.id);
             if (self) {
@@ -515,6 +532,11 @@ function RoomPage() {
       .on("broadcast", { event: "swing" }, ({ payload }) => {
         const s = payload as SwingFx;
         swingsRef.current.push({ ...s, born: performance.now() });
+      })
+      .on("broadcast", { event: "gear" }, ({ payload }) => {
+        const g = payload as { kind: "heal" | "smoke"; x: number; y: number; r: number; life: number; owner: string };
+        if (g.kind !== "heal" && g.kind !== "smoke") return;
+        gearRef.current.push({ ...g, r: Math.min(200, Number(g.r) || 100), life: Math.min(10000, Number(g.life) || 5000), born: performance.now() });
       })
       .on("broadcast", { event: "boom" }, ({ payload }) => {
         const b = payload as BoomFx;
@@ -1107,9 +1129,14 @@ function RoomPage() {
       if (w.id === "sniper") return; // release-to-fire
       lastFireRef.current[w.id] = t;
       const ang = currentAimAngle(self);
-      const dmgScale = dmgMult(self.upgrades);
+      const dmgScale = dmgMult(self.upgrades) * (buffRef.current.dmgUntil > now ? 2 : 1);
 
-
+      if (w.gear) {
+        const g = { kind: w.gear, x: self.x, y: self.y, r: w.radius, life: w.lifetime, owner: me.id };
+        gearRef.current.push({ ...g, born: now });
+        channelRef.current?.send({ type: "broadcast", event: "gear", payload: g });
+        return;
+      }
 
       if (w.placeable) {
         const p: Projectile = {
@@ -1354,7 +1381,7 @@ function RoomPage() {
           }
           if (dx || dy) {
             const len = Math.hypot(dx, dy) || 1;
-            const sp = BASE_SPEED * speedMult(self.upgrades);
+            const sp = BASE_SPEED * speedMult(self.upgrades) * (buffRef.current.speedUntil > now ? 1.45 : 1);
             self.x += (dx / len) * sp * dt;
             self.y += (dy / len) * sp * dt;
             self.x = Math.max(PLAYER_R, Math.min(world.w - PLAYER_R, self.x));
@@ -1364,6 +1391,16 @@ function RoomPage() {
           }
         }
         self.aim = currentAimAngle(self);
+        // Healing beacons heal everyone standing in them
+        if (self.hp > 0 && self.hp < self.maxHp) {
+          for (const g of gearRef.current) {
+            if (g.kind === "heal" && Math.hypot(self.x - g.x, self.y - g.y) < g.r) {
+              self.hp = Math.min(self.maxHp, self.hp + self.maxHp * 0.08 * dt);
+              setHpUi({ hp: self.hp, max: self.maxHp });
+              break;
+            }
+          }
+        }
         tryFire(now);
       }
 
@@ -1697,6 +1734,17 @@ function RoomPage() {
       }
 
 
+      gearRef.current = gearRef.current.filter((g) => now - g.born < g.life);
+      for (const g of gearRef.current) {
+        if (g.kind !== "heal") continue;
+        const pulse = 0.5 + 0.5 * Math.sin(now / 250);
+        ctx.fillStyle = `rgba(74,222,128,${0.12 + 0.08 * pulse})`;
+        ctx.strokeStyle = "rgba(74,222,128,0.7)";
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(g.x, g.y, g.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = "#4ade80"; ctx.fillRect(g.x - 3, g.y - 10, 6, 20); ctx.fillRect(g.x - 10, g.y - 3, 20, 6);
+      }
+
       for (const b of boomsRef.current) {
         const age = (now - b.born) / 400;
         ctx.globalAlpha = Math.max(0, 1 - age);
@@ -1819,6 +1867,20 @@ function RoomPage() {
         ctx.fillRect(p.x - w / 2, p.y - PLAYER_R - 8, w, 4);
         ctx.fillStyle = p.hp > p.maxHp * 0.5 ? "#4ade80" : p.hp > p.maxHp * 0.25 ? "#facc15" : "#ef4444";
         ctx.fillRect(p.x - w / 2, p.y - PLAYER_R - 8, (w * p.hp) / p.maxHp, 4);
+      }
+
+      // Smoke clouds hide everything inside them
+      for (const g of gearRef.current) {
+        if (g.kind !== "smoke") continue;
+        const left = 1 - (now - g.born) / g.life;
+        const a = Math.min(1, left * 4) * 0.92;
+        for (let i = 0; i < 7; i++) {
+          const ang = i * 0.9 + now / 3000;
+          const ox = i === 0 ? 0 : Math.cos(ang) * g.r * 0.45;
+          const oy = i === 0 ? 0 : Math.sin(ang) * g.r * 0.45;
+          ctx.fillStyle = `rgba(148,163,184,${a * 0.6})`;
+          ctx.beginPath(); ctx.arc(g.x + ox, g.y + oy, g.r * (i === 0 ? 0.8 : 0.55), 0, Math.PI * 2); ctx.fill();
+        }
       }
 
       if (self && self.hp > 0 && weaponRef.current === "sniper" && chargeStartRef.current != null) {
