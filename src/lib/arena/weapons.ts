@@ -9,7 +9,8 @@ export type WeaponId =
   | "freeze_ray" | "poison_dart" | "lightning" | "blackhole"
   | "turret" | "drone_swarm" | "javelin" | "bazooka"
   | "icicle" | "acid_spitter" | "gauss_rifle"
-  | "heal_beacon" | "smoke_grenade";
+  | "heal_beacon" | "smoke_grenade"
+  | "emp" | "flashbang" | "barricade" | "energy_shield";
 
 
 export type Rarity = "common" | "rare" | "epic" | "legendary";
@@ -41,7 +42,7 @@ export type WeaponDef = {
   immobilize?: number; // ms freeze on hit
   twin?: boolean; // dual barrels
   summon?: number; // mini soldier count
-  gear?: "heal" | "smoke"; // utility item, no damage
+  gear?: "heal" | "smoke" | "emp" | "flash" | "barricade" | "shield"; // utility item, no damage
   rarity: Rarity;
 };
 
@@ -91,6 +92,10 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
   gauss_rifle:      { id: "gauss_rifle",      name: "Gauss Rifle",      cooldown: 1.4,  dmg: 52, speed: 1300, lifetime: 1500, radius: 3, charge: 0.5, pierce: true, rarity: "legendary" },
   heal_beacon:      { id: "heal_beacon",      name: "Healing Beacon",   cooldown: 12,   dmg: 0,  speed: 0, lifetime: 8000, radius: 90, gear: "heal", rarity: "epic" },
   smoke_grenade:    { id: "smoke_grenade",    name: "Smoke Grenade",    cooldown: 6,    dmg: 0,  speed: 0, lifetime: 7000, radius: 130, gear: "smoke", rarity: "rare" },
+  emp:              { id: "emp",              name: "EMP Blast",        cooldown: 10,   dmg: 0,  speed: 0, lifetime: 2500, radius: 220, gear: "emp", rarity: "epic" },
+  flashbang:        { id: "flashbang",        name: "Flashbang",        cooldown: 8,    dmg: 0,  speed: 0, lifetime: 2500, radius: 260, gear: "flash", rarity: "rare" },
+  barricade:        { id: "barricade",        name: "Barricade",        cooldown: 9,    dmg: 0,  speed: 0, lifetime: 10000, radius: 0, gear: "barricade", rarity: "rare" },
+  energy_shield:    { id: "energy_shield",    name: "Energy Shield",    cooldown: 14,   dmg: 0,  speed: 0, lifetime: 3500, radius: 34, gear: "shield", rarity: "epic" },
 };
 
 export const WEAPON_ORDER: WeaponId[] = [
@@ -105,6 +110,7 @@ export const WEAPON_ORDER: WeaponId[] = [
   "turret", "drone_swarm", "javelin", "bazooka",
   "icicle", "acid_spitter", "gauss_rifle",
   "heal_beacon", "smoke_grenade",
+  "emp", "flashbang", "barricade", "energy_shield",
 ];
 
 export const ALL_WEAPONS = WEAPON_ORDER;

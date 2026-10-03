@@ -226,7 +226,10 @@ function RoomPage() {
   const matchKillsRef = useRef(0);
   const streakRef = useRef(0);
   const buffRef = useRef({ speedUntil: 0, dmgUntil: 0 });
-  const gearRef = useRef<{ kind: "heal" | "smoke"; x: number; y: number; r: number; born: number; life: number; owner: string }[]>([]);
+  type GearKind = "heal" | "smoke" | "emp" | "flash" | "barricade" | "shield";
+  const gearRef = useRef<{ kind: GearKind; x: number; y: number; r: number; born: number; life: number; owner: string; rect?: { x: number; y: number; w: number; h: number } }[]>([]);
+  const shieldUntilRef = useRef(0);
+  const blindUntilRef = useRef(0);
 
   // Game state in refs
   const playersRef = useRef<Map<string, Player>>(new Map());
@@ -386,9 +389,38 @@ function RoomPage() {
       projectilesRef.current.push(p);
     }
 
+    function applyGear(g: { kind: GearKind; x: number; y: number; r: number; life: number; owner: string; aim: number }) {
+      const now = performance.now();
+      const entry: (typeof gearRef.current)[number] = { kind: g.kind, x: g.x, y: g.y, r: g.r, life: g.life, owner: g.owner, born: now };
+      const self = playersRef.current.get(me.id);
+      const near = (px: number, py: number) => Math.hypot(px - g.x, py - g.y) < g.r;
+      if (g.kind === "barricade") {
+        const cx = g.x + Math.cos(g.aim) * 60, cy = g.y + Math.sin(g.aim) * 60;
+        const horiz = Math.abs(Math.sin(g.aim)) > Math.abs(Math.cos(g.aim));
+        const rect = horiz ? { x: cx - 60, y: cy - 12, w: 120, h: 24 } : { x: cx - 12, y: cy - 60, w: 24, h: 120 };
+        entry.rect = rect;
+        world.obstacles.push(rect);
+      } else if (g.kind === "emp") {
+        // Stun enemy players and bots, fry enemy summons in range
+        for (const p of playersRef.current.values()) {
+          if (p.id === g.owner || !near(p.x, p.y)) continue;
+          p.immobilizedUntil = Math.max(p.immobilizedUntil, now + (isBot(p.id) ? 3500 : 1500));
+        }
+        projectilesRef.current = projectilesRef.current.filter(
+          (b) => !(b.owner !== g.owner && WEAPONS[b.weapon]?.summon && near(b.x, b.y)),
+        );
+      } else if (g.kind === "flash") {
+        if (self && self.id !== g.owner && near(self.x, self.y)) blindUntilRef.current = now + 2500;
+      } else if (g.kind === "shield") {
+        if (g.owner === me.id) shieldUntilRef.current = now + g.life;
+      }
+      gearRef.current.push(entry);
+    }
+
     function applyDamage(targetId: string, byId: string, dmg: number, weapon: WeaponId, immobilizeMs?: number) {
       const t = playersRef.current.get(targetId);
       if (!t || t.hp <= 0) return;
+      if (targetId === me.id && shieldUntilRef.current > performance.now()) return;
       // Respawn safe zones: no damage in, no damage out
       if (inSafeZone(world, t.x, t.y)) return;
       const attacker = playersRef.current.get(byId);
@@ -534,9 +566,9 @@ function RoomPage() {
         swingsRef.current.push({ ...s, born: performance.now() });
       })
       .on("broadcast", { event: "gear" }, ({ payload }) => {
-        const g = payload as { kind: "heal" | "smoke"; x: number; y: number; r: number; life: number; owner: string };
-        if (g.kind !== "heal" && g.kind !== "smoke") return;
-        gearRef.current.push({ ...g, r: Math.min(200, Number(g.r) || 100), life: Math.min(10000, Number(g.life) || 5000), born: performance.now() });
+        const g = payload as { kind: GearKind; x: number; y: number; r: number; life: number; owner: string; aim?: number };
+        if (!["heal", "smoke", "emp", "flash", "barricade", "shield"].includes(g.kind)) return;
+        applyGear({ kind: g.kind, x: Number(g.x) || 0, y: Number(g.y) || 0, r: Math.min(300, Number(g.r) || 100), life: Math.min(12000, Number(g.life) || 3000), owner: String(g.owner), aim: Number(g.aim) || 0 });
       })
       .on("broadcast", { event: "boom" }, ({ payload }) => {
         const b = payload as BoomFx;
@@ -965,6 +997,7 @@ function RoomPage() {
           continue;
         }
         if (!focus) continue;
+        if (bot.immobilizedUntil > now) continue; // EMP'd
 
         const dx = focus.x - bot.x;
         const dy = focus.y - bot.y;
@@ -1132,8 +1165,8 @@ function RoomPage() {
       const dmgScale = dmgMult(self.upgrades) * (buffRef.current.dmgUntil > now ? 2 : 1);
 
       if (w.gear) {
-        const g = { kind: w.gear, x: self.x, y: self.y, r: w.radius, life: w.lifetime, owner: me.id };
-        gearRef.current.push({ ...g, born: now });
+        const g = { kind: w.gear, x: self.x, y: self.y, r: w.radius, life: w.lifetime, owner: me.id, aim: ang };
+        applyGear(g);
         channelRef.current?.send({ type: "broadcast", event: "gear", payload: g });
         return;
       }
@@ -1734,8 +1767,27 @@ function RoomPage() {
       }
 
 
-      gearRef.current = gearRef.current.filter((g) => now - g.born < g.life);
+      gearRef.current = gearRef.current.filter((g) => {
+        if (now - g.born < g.life) return true;
+        if (g.rect) { const i = world.obstacles.indexOf(g.rect); if (i >= 0) world.obstacles.splice(i, 1); }
+        return false;
+      });
       for (const g of gearRef.current) {
+        const age = (now - g.born) / g.life;
+        if (g.rect) {
+          ctx.fillStyle = "#475569"; ctx.fillRect(g.rect.x, g.rect.y, g.rect.w, g.rect.h);
+          ctx.strokeStyle = "#fbbf24"; ctx.lineWidth = 2; ctx.strokeRect(g.rect.x, g.rect.y, g.rect.w, g.rect.h);
+        } else if (g.kind === "emp" || g.kind === "flash") {
+          ctx.strokeStyle = g.kind === "emp" ? `rgba(56,189,248,${1 - age})` : `rgba(255,255,255,${1 - age})`;
+          ctx.lineWidth = 4;
+          ctx.beginPath(); ctx.arc(g.x, g.y, g.r * Math.min(1, age * 3), 0, Math.PI * 2); ctx.stroke();
+        } else if (g.kind === "shield") {
+          const o = playersRef.current.get(g.owner);
+          if (o && o.hp > 0) {
+            ctx.strokeStyle = "rgba(125,211,252,0.9)"; ctx.fillStyle = "rgba(125,211,252,0.15)"; ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.arc(o.x, o.y, g.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          }
+        }
         if (g.kind !== "heal") continue;
         const pulse = 0.5 + 0.5 * Math.sin(now / 250);
         ctx.fillStyle = `rgba(74,222,128,${0.12 + 0.08 * pulse})`;
