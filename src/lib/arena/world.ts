@@ -1,4 +1,4 @@
-import { ALL_WEAPONS, type WeaponId } from "@/lib/arena/weapons";
+import { rollRandomWeapon, type WeaponId } from "@/lib/arena/weapons";
 
 export type TerrainId = "open" | "blocks" | "pillars" | "maze";
 export type MapSizeId = "small" | "medium" | "large" | "massive";
@@ -211,7 +211,7 @@ export const MEDKIT_HEAL = 45;
 export const PICKUP_RESPAWN_MS = 25000;
 
 export function randomLootWeapon(rng: () => number = Math.random): WeaponId {
-  return ALL_WEAPONS[Math.floor(rng() * ALL_WEAPONS.length)];
+  return rollRandomWeapon(rng);
 }
 
 /** Push a circle out of any rect it overlaps. Mutates and returns the position. */

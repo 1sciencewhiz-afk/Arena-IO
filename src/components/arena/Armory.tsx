@@ -10,6 +10,10 @@ import {
   WEAPON_ROLL_COST,
   RARITY_META,
   rollRandomWeapon,
+  GEAR_IDS,
+  GEAR_PRICE,
+  GEAR_DESC,
+  type GearId,
   upgradeCost,
   maxHp,
   ZERO_UPGRADES,
@@ -68,6 +72,13 @@ export function Armory({ loadout, update, isGuest }: Props) {
     setFlash({ weapon: pending, isNew: true });
     setTimeout(() => setFlash(null), 2400);
     setPending(null);
+  };
+
+  const buyGear = (id: GearId) => {
+    const price = GEAR_PRICE[id];
+    if (loadout.killPoints < price) return;
+    const gear = { ...loadout.gear, [id]: (loadout.gear[id] ?? 0) + 1 };
+    update({ killPoints: loadout.killPoints - price, gear });
   };
 
   const maxHpPreview = maxHp(loadout.upgrades || ZERO_UPGRADES);
@@ -179,6 +190,32 @@ export function Armory({ loadout, update, isGuest }: Props) {
                 <div className="text-[10px]" style={{ color: RARITY_META[w.rarity].color }}>
                   {RARITY_META[w.rarity].label} · {Math.round(w.dmg)} dmg
                 </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-foreground/10 bg-foreground/5 p-4">
+        <h3 className="mb-1 text-xs uppercase tracking-wider text-foreground/60">Gear Store</h3>
+        <p className="mb-3 text-[11px] text-foreground/50">
+          Utility items you keep until used. Buy as many as you like. In a match press 5–0 (or tap the gear buttons) to use one.
+        </p>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {GEAR_IDS.map((id) => {
+            const price = GEAR_PRICE[id];
+            const can = loadout.killPoints >= price;
+            return (
+              <div key={id} className="flex items-center justify-between gap-2 rounded-lg border border-foreground/10 bg-background/40 p-2">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold">
+                    {WEAPONS[id].name} <span className="font-mono text-xs text-primary">×{loadout.gear[id] ?? 0}</span>
+                  </div>
+                  <div className="text-[10px] text-foreground/50">{GEAR_DESC[id]}</div>
+                </div>
+                <Button size="sm" variant={can ? "default" : "secondary"} disabled={!can} onClick={() => buyGear(id)}>
+                  Buy ({price})
+                </Button>
               </div>
             );
           })}

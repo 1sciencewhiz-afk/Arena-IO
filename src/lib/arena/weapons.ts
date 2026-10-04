@@ -16,10 +16,10 @@ export type WeaponId =
 export type Rarity = "common" | "rare" | "epic" | "legendary";
 
 export const RARITY_META: Record<Rarity, { label: string; color: string; weight: number }> = {
-  common:    { label: "Common",    color: "#9ca3af", weight: 55 },
-  rare:      { label: "Rare",      color: "#60a5fa", weight: 28 },
-  epic:      { label: "Epic",      color: "#c084fc", weight: 13 },
-  legendary: { label: "Legendary", color: "#fbbf24", weight: 4 },
+  common:    { label: "Common",    color: "#9ca3af", weight: 70 },
+  rare:      { label: "Rare",      color: "#60a5fa", weight: 22 },
+  epic:      { label: "Epic",      color: "#c084fc", weight: 6.5 },
+  legendary: { label: "Legendary", color: "#fbbf24", weight: 1.5 },
 };
 
 export type WeaponDef = {
@@ -113,8 +113,28 @@ export const WEAPON_ORDER: WeaponId[] = [
   "emp", "flashbang", "barricade", "energy_shield",
 ];
 
-export const ALL_WEAPONS = WEAPON_ORDER;
-export const WEAPON_ROLL_COST = 4;
+/** Store-only utility gear: bought with points, never dropped or rolled. */
+export const GEAR_IDS = ["heal_beacon", "smoke_grenade", "emp", "flashbang", "barricade", "energy_shield"] as const;
+export type GearId = (typeof GEAR_IDS)[number];
+export type GearCounts = Partial<Record<GearId, number>>;
+export const GEAR_PRICE: Record<GearId, number> = {
+  heal_beacon: 6, smoke_grenade: 4, emp: 10, flashbang: 6, barricade: 5, energy_shield: 10,
+};
+export const GEAR_DESC: Record<GearId, string> = {
+  heal_beacon: "Heals anyone standing in it",
+  smoke_grenade: "Cloud that hides players",
+  emp: "Stuns enemies & bots, fries summons",
+  flashbang: "Whites out nearby enemies' screens",
+  barricade: "Temporary wall in front of you",
+  energy_shield: "Blocks all damage for 3.5s",
+};
+export function isGearId(v: unknown): v is GearId {
+  return typeof v === "string" && (GEAR_IDS as readonly string[]).includes(v);
+}
+
+/** Weapons that can appear in crates, loot boxes and hotbars (no gear). */
+export const ALL_WEAPONS = WEAPON_ORDER.filter((w) => !isGearId(w));
+export const WEAPON_ROLL_COST = 12;
 export const STARTING_WEAPONS: WeaponId[] = ["pistol"];
 export const MAX_INVENTORY = 4;
 
@@ -125,12 +145,12 @@ export function isWeaponId(v: unknown): v is WeaponId {
 }
 
 export function rollRandomWeapon(rng: () => number = Math.random): WeaponId {
-  const total = WEAPON_ORDER.reduce(
+  const total = ALL_WEAPONS.reduce(
     (acc, id) => acc + RARITY_META[WEAPONS[id].rarity].weight,
     0,
   );
   let r = rng() * total;
-  for (const id of WEAPON_ORDER) {
+  for (const id of ALL_WEAPONS) {
     r -= RARITY_META[WEAPONS[id].rarity].weight;
     if (r <= 0) return id;
   }
@@ -158,7 +178,7 @@ export const UPGRADE_DEFS: { id: UpgradeId; name: string; desc: string }[] = [
   { id: "health",   name: "Max HP",     desc: "+15 per level" },
 ];
 
-export function upgradeCost(currentLevel: number) { return currentLevel + 1; }
+export function upgradeCost(currentLevel: number) { return (currentLevel + 1) * 3; }
 export function dmgMult(u: Upgrades)      { return 1 + 0.1 * u.damage; }
 export function cooldownMult(u: Upgrades) { return Math.max(0.15, Math.pow(0.93, u.cooldown)); }
 export function speedMult(u: Upgrades)    { return 1 + 0.08 * u.speed; }

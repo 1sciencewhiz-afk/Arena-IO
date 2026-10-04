@@ -19,6 +19,9 @@ import {
   speedMult,
   maxHp,
   RARITY_META,
+  GEAR_IDS,
+  type GearId,
+  type GearCounts,
   type WeaponId,
   type Upgrades,
 } from "@/lib/arena/weapons";
@@ -244,6 +247,13 @@ function RoomPage() {
   const chargeStartRef = useRef<number | null>(null);
   const upgradesRef = useRef<Upgrades>({ ...ZERO_UPGRADES });
   const hotbarRef = useRef<WeaponId[]>(["pistol"]);
+  // Field pickups override slots for this life only; never saved
+  const baseHotbarRef = useRef<WeaponId[]>(["pistol"]);
+  const fieldSlotsRef = useRef<(WeaponId | null)[]>([null, null, null, null]);
+  const [hotbarUi, setHotbarUi] = useState<WeaponId[]>(["pistol"]);
+  const gearCountsRef = useRef<GearCounts>({});
+  const [gearUi, setGearUi] = useState<GearCounts>({});
+  const useGearRef = useRef<(id: GearId) => void>(() => {});
   const isAdminRef = useRef(false);
   const hostRef = useRef(false);
   const botStateRef = useRef<
@@ -277,11 +287,28 @@ function RoomPage() {
   } | null>(null);
 
   updateLoadoutRef.current = updateLoadout;
+  function composeHotbar() {
+    const base = baseHotbarRef.current;
+    const out: WeaponId[] = [];
+    for (let i = 0; i < 4; i++) {
+      const w = fieldSlotsRef.current[i] ?? base[i];
+      if (w && !out.includes(w)) out.push(w);
+    }
+    hotbarRef.current = out.length ? out : ["pistol"];
+    setHotbarUi([...hotbarRef.current]);
+    if (!hotbarRef.current.includes(weaponRef.current)) {
+      weaponRef.current = hotbarRef.current[0];
+      setWeaponUi(weaponRef.current);
+    }
+  }
   // Apply loadout to self when it loads / changes
   useEffect(() => {
     if (!loadout) return;
     upgradesRef.current = { ...loadout.upgrades };
-    hotbarRef.current = loadout.hotbar.length ? [...loadout.hotbar] : ["pistol"];
+    baseHotbarRef.current = loadout.hotbar.length ? [...loadout.hotbar] : ["pistol"];
+    gearCountsRef.current = { ...loadout.gear };
+    setGearUi({ ...loadout.gear });
+    composeHotbar();
 
     // Ensure equipped weapon is in hotbar
     if (!hotbarRef.current.includes(weaponRef.current)) {
@@ -389,6 +416,23 @@ function RoomPage() {
       projectilesRef.current.push(p);
     }
 
+    useGearRef.current = (id: GearId) => {
+      const self = playersRef.current.get(me.id);
+      if (!self || self.hp <= 0) return;
+      const have = gearCountsRef.current[id] ?? 0;
+      if (have <= 0) { setLootMsg(`No ${WEAPONS[id].name} left — buy more in the Gear Store`); window.setTimeout(() => setLootMsg(null), 1800); return; }
+      const w = WEAPONS[id];
+      const t = performance.now() / 1000;
+      if (t - (lastFireRef.current[id] ?? -999) < 1) return;
+      lastFireRef.current[id] = t;
+      const g = { kind: w.gear!, x: self.x, y: self.y, r: w.radius, life: w.lifetime, owner: me.id, aim: currentAimAngle(self) };
+      applyGear(g);
+      channelRef.current?.send({ type: "broadcast", event: "gear", payload: g });
+      gearCountsRef.current = { ...gearCountsRef.current, [id]: have - 1 };
+      setGearUi({ ...gearCountsRef.current });
+      void updateLoadoutRef.current({ gear: { ...gearCountsRef.current } });
+    };
+
     function applyGear(g: { kind: GearKind; x: number; y: number; r: number; life: number; owner: string; aim: number }) {
       const now = performance.now();
       const entry: (typeof gearRef.current)[number] = { kind: g.kind, x: g.x, y: g.y, r: g.r, life: g.life, owner: g.owner, born: now };
@@ -452,6 +496,9 @@ function RoomPage() {
           if (perk) { setLootMsg(perk); window.setTimeout(() => setLootMsg(null), 2200); }
         }
         if (targetId === me.id) {
+          // Weapons picked up on the field are lost on death
+          fieldSlotsRef.current = [null, null, null, null];
+          composeHotbar();
           streakRef.current = 0;
           buffRef.current = { speedUntil: 0, dmgUntil: 0 };
           setTimeout(() => {
@@ -613,6 +660,8 @@ function RoomPage() {
       const key = e.key.toLowerCase();
       keysRef.current.add(key);
       const idx = ["1", "2", "3", "4"].indexOf(key);
+      const gIdx = ["5", "6", "7", "8", "9", "0"].indexOf(key);
+      if (gIdx >= 0) useGearRef.current(GEAR_IDS[gIdx]);
       if (idx >= 0) {
         const w = hotbarRef.current[idx];
         if (w) {
@@ -1164,12 +1213,7 @@ function RoomPage() {
       const ang = currentAimAngle(self);
       const dmgScale = dmgMult(self.upgrades) * (buffRef.current.dmgUntil > now ? 2 : 1);
 
-      if (w.gear) {
-        const g = { kind: w.gear, x: self.x, y: self.y, r: w.radius, life: w.lifetime, owner: me.id, aim: ang };
-        applyGear(g);
-        channelRef.current?.send({ type: "broadcast", event: "gear", payload: g });
-        return;
-      }
+      if (w.gear) return; // gear is used from the gear bar, not the hotbar
 
       if (w.placeable) {
         const p: Projectile = {
@@ -1456,8 +1500,8 @@ function RoomPage() {
               setLootMsg(`${WEAPONS[w].name} — already carried`);
               window.setTimeout(() => setLootMsg(null), 1800);
             } else if (hotbarRef.current.length < 4) {
-              hotbarRef.current = [...hotbarRef.current, w];
-              void updateLoadoutRef.current({ inventory: [...hotbarRef.current], hotbar: [...hotbarRef.current] });
+              fieldSlotsRef.current[hotbarRef.current.length] = w;
+              composeHotbar();
               setLootMsg(`Picked up ${WEAPONS[w].name}!`);
               window.setTimeout(() => setLootMsg(null), 1800);
             } else {
@@ -1975,7 +2019,7 @@ function RoomPage() {
     return `${window.location.origin}/room/${code}?c=${encodeConfig(config)}`;
   }, [code, config]);
 
-  const hotbar = loadout.hotbar;
+  const hotbar = hotbarUi;
   void startKillPointsRef; // referenced for future use
 
   return (
@@ -2053,10 +2097,11 @@ function RoomPage() {
                         key={w}
                         className="rounded bg-foreground/10 px-2 py-1.5 hover:bg-foreground/20"
                         onClick={() => {
-                          const next = hotbarRef.current.map((x) => (x === w ? lootPick : x));
-                          hotbarRef.current = next;
-                          if (weaponRef.current === w) { weaponRef.current = lootPick; setWeaponUi(lootPick); }
-                          void updateLoadout({ inventory: [...next], hotbar: [...next] });
+                          const slot = hotbarRef.current.indexOf(w);
+                          if (slot >= 0) fieldSlotsRef.current[slot] = lootPick;
+                          const wasActive = weaponRef.current === w;
+                          composeHotbar();
+                          if (wasActive) { weaponRef.current = lootPick; setWeaponUi(lootPick); }
                           setLootPick(null);
                         }}
                       >
@@ -2077,6 +2122,21 @@ function RoomPage() {
                 style={isTouch ? undefined : { aspectRatio: `${VIEW_W} / ${VIEW_H}` }}
               />
             </div>
+            {/* Gear bar */}
+            {GEAR_IDS.some((id) => (gearUi[id] ?? 0) > 0) && (
+              <div className={`flex flex-wrap gap-1.5 ${isTouch ? "fixed left-1/2 top-2 z-40 -translate-x-1/2" : ""}`}>
+                {GEAR_IDS.map((id, i) => (gearUi[id] ?? 0) > 0 && (
+                  <button
+                    key={id}
+                    onClick={() => useGearRef.current(id)}
+                    className="rounded-md border border-primary/40 bg-background/80 px-2 py-1 text-[11px] font-semibold text-foreground hover:bg-primary/10"
+                  >
+                    {WEAPONS[id].name} ×{gearUi[id]}
+                    {!isTouch && <span className="ml-1 font-mono text-[9px] text-foreground/40">{(i + 5) % 10}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
             {/* Hotbar (desktop) */}
             {!isTouch && (
             <div className="grid grid-cols-4 gap-2">

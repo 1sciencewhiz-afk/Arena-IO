@@ -4,6 +4,8 @@ import {
   ZERO_UPGRADES,
   STARTING_WEAPONS,
   isWeaponId,
+  isGearId,
+  type GearCounts,
   type Upgrades,
   type WeaponId,
 } from "@/lib/arena/weapons";
@@ -17,6 +19,7 @@ export type Profile = {
   storage_weapons: WeaponId[];
   hotbar: WeaponId[];
   banned: boolean;
+  gear: GearCounts;
 };
 
 function usernameToEmail(username: string) {
@@ -28,6 +31,17 @@ function sanitizeWeaponArr(v: unknown, fallback: WeaponId[]): WeaponId[] {
   const out: WeaponId[] = [];
   for (const x of v) if (isWeaponId(x) && !out.includes(x)) out.push(x);
   return out.length ? out : [...fallback];
+}
+
+export function sanitizeGear(v: unknown): GearCounts {
+  const out: GearCounts = {};
+  if (v && typeof v === "object") {
+    for (const [k, n] of Object.entries(v as Record<string, unknown>)) {
+      const c = Math.floor(Number(n) || 0);
+      if (isGearId(k) && c > 0) out[k] = Math.min(9999, c);
+    }
+  }
+  return out;
 }
 
 export function useAuthUser() {
@@ -59,7 +73,7 @@ export function useProfile(userId: string | null) {
     (async () => {
       const { data } = await supabase
         .from("profiles")
-        .select("user_id, username, kill_points, upgrades, inventory, storage_weapons, hotbar, banned")
+        .select("user_id, username, kill_points, upgrades, inventory, storage_weapons, hotbar, banned, gear")
         .eq("user_id", userId)
         .maybeSingle();
       if (!cancelled && data) {
@@ -76,6 +90,7 @@ export function useProfile(userId: string | null) {
           storage_weapons: sanitizeWeaponArr(data.storage_weapons, []),
           hotbar: hotbar.length ? hotbar : [inventory[0] ?? "pistol"],
           banned: !!(data as { banned?: boolean }).banned,
+          gear: sanitizeGear((data as { gear?: unknown }).gear),
         });
       }
     })();
@@ -126,6 +141,7 @@ export async function saveProfileProgress(
     inventory?: WeaponId[];
     storage_weapons?: WeaponId[];
     hotbar?: WeaponId[];
+    gear?: GearCounts;
   },
 ) {
   await supabase.from("profiles").update(patch).eq("user_id", userId);
