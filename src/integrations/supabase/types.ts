@@ -18,6 +18,7 @@ export type Database = {
         Row: {
           banned: boolean
           created_at: string
+          gear: Json
           hotbar: Json
           id: string
           inventory: Json
@@ -31,6 +32,7 @@ export type Database = {
         Insert: {
           banned?: boolean
           created_at?: string
+          gear?: Json
           hotbar?: Json
           id?: string
           inventory?: Json
@@ -44,6 +46,7 @@ export type Database = {
         Update: {
           banned?: boolean
           created_at?: string
+          gear?: Json
           hotbar?: Json
           id?: string
           inventory?: Json
