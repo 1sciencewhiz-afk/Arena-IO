@@ -1944,6 +1944,14 @@ function RoomPage() {
         ctx.arc(self.x, self.y, PLAYER_R + 6, -Math.PI / 2, -Math.PI / 2 + ratio * Math.PI * 2);
         ctx.stroke();
       }
+
+      // Flashbang white-out (screen space)
+      const blindLeft = blindUntilRef.current - now;
+      if (blindLeft > 0) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.fillStyle = `rgba(255,255,255,${Math.min(0.97, blindLeft / 1200)})`;
+        ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+      }
     }
 
     raf = requestAnimationFrame(step);
