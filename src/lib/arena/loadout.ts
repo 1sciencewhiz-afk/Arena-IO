@@ -46,7 +46,7 @@ function readGuest(): Loadout {
       upgrades: { ...def.upgrades, ...(j.upgrades ?? {}) },
       inventory: Array.isArray(j.inventory) ? j.inventory.filter(isWeaponId) : def.inventory,
       storage: Array.isArray(j.storage) ? j.storage.filter(isWeaponId) : def.storage,
-      hotbar: (Array.isArray(j.hotbar) ? j.hotbar.filter(isWeaponId) : def.hotbar).slice(0, MAX_HOTBAR),
+      hotbar: (Array.isArray(j.hotbar) ? j.hotbar.filter((w: unknown) => isWeaponId(w) && !isGearId(w)) : def.hotbar).slice(0, MAX_HOTBAR),
       gear: sanitizeGear(j.gear),
     };
   } catch {
