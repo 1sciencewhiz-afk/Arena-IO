@@ -19,6 +19,9 @@ import {
   speedMult,
   maxHp,
   RARITY_META,
+  GEAR_IDS,
+  type GearId,
+  type GearCounts,
   type WeaponId,
   type Upgrades,
 } from "@/lib/arena/weapons";
@@ -249,6 +252,7 @@ function RoomPage() {
   const fieldSlotsRef = useRef<(WeaponId | null)[]>([null, null, null, null]);
   const [hotbarUi, setHotbarUi] = useState<WeaponId[]>(["pistol"]);
   const gearCountsRef = useRef<GearCounts>({});
+  const [gearUi, setGearUi] = useState<GearCounts>({});
   const useGearRef = useRef<(id: GearId) => void>(() => {});
   const isAdminRef = useRef(false);
   const hostRef = useRef(false);
@@ -303,6 +307,7 @@ function RoomPage() {
     upgradesRef.current = { ...loadout.upgrades };
     baseHotbarRef.current = loadout.hotbar.length ? [...loadout.hotbar] : ["pistol"];
     gearCountsRef.current = { ...loadout.gear };
+    setGearUi({ ...loadout.gear });
     composeHotbar();
 
     // Ensure equipped weapon is in hotbar
@@ -410,6 +415,23 @@ function RoomPage() {
       }
       projectilesRef.current.push(p);
     }
+
+    useGearRef.current = (id: GearId) => {
+      const self = playersRef.current.get(me.id);
+      if (!self || self.hp <= 0) return;
+      const have = gearCountsRef.current[id] ?? 0;
+      if (have <= 0) { setLootMsg(`No ${WEAPONS[id].name} left — buy more in the Gear Store`); window.setTimeout(() => setLootMsg(null), 1800); return; }
+      const w = WEAPONS[id];
+      const t = performance.now() / 1000;
+      if (t - (lastFireRef.current[id] ?? -999) < 1) return;
+      lastFireRef.current[id] = t;
+      const g = { kind: w.gear!, x: self.x, y: self.y, r: w.radius, life: w.lifetime, owner: me.id, aim: currentAimAngle(self) };
+      applyGear(g);
+      channelRef.current?.send({ type: "broadcast", event: "gear", payload: g });
+      gearCountsRef.current = { ...gearCountsRef.current, [id]: have - 1 };
+      setGearUi({ ...gearCountsRef.current });
+      void updateLoadoutRef.current({ gear: { ...gearCountsRef.current } });
+    };
 
     function applyGear(g: { kind: GearKind; x: number; y: number; r: number; life: number; owner: string; aim: number }) {
       const now = performance.now();
@@ -2100,6 +2122,21 @@ function RoomPage() {
                 style={isTouch ? undefined : { aspectRatio: `${VIEW_W} / ${VIEW_H}` }}
               />
             </div>
+            {/* Gear bar */}
+            {GEAR_IDS.some((id) => (gearUi[id] ?? 0) > 0) && (
+              <div className={`flex flex-wrap gap-1.5 ${isTouch ? "fixed left-1/2 top-2 z-40 -translate-x-1/2" : ""}`}>
+                {GEAR_IDS.map((id, i) => (gearUi[id] ?? 0) > 0 && (
+                  <button
+                    key={id}
+                    onClick={() => useGearRef.current(id)}
+                    className="rounded-md border border-primary/40 bg-background/80 px-2 py-1 text-[11px] font-semibold text-foreground hover:bg-primary/10"
+                  >
+                    {WEAPONS[id].name} ×{gearUi[id]}
+                    {!isTouch && <span className="ml-1 font-mono text-[9px] text-foreground/40">{(i + 5) % 10}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
             {/* Hotbar (desktop) */}
             {!isTouch && (
             <div className="grid grid-cols-4 gap-2">
