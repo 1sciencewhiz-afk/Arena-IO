@@ -5,10 +5,12 @@ import {
   MAX_INVENTORY,
   MAX_HOTBAR,
   isWeaponId,
+  isGearId,
+  type GearCounts,
   type Upgrades,
   type WeaponId,
 } from "@/lib/arena/weapons";
-import { useProfile, saveProfileProgress } from "@/lib/arena/auth";
+import { useProfile, saveProfileProgress, sanitizeGear } from "@/lib/arena/auth";
 
 export type Loadout = {
   killPoints: number;
@@ -16,6 +18,7 @@ export type Loadout = {
   inventory: WeaponId[]; // playable; max MAX_INVENTORY
   storage: WeaponId[];   // overflow; only swappable in lobby
   hotbar: WeaponId[];    // max MAX_HOTBAR; subset of inventory
+  gear: GearCounts;      // store-bought utility items, unlimited
 };
 
 const GUEST_KEY = "arena.loadout.v1";
@@ -27,6 +30,7 @@ export function defaultLoadout(): Loadout {
     inventory: [...STARTING_WEAPONS],
     storage: [],
     hotbar: [...STARTING_WEAPONS],
+    gear: {},
   };
 }
 
@@ -43,6 +47,7 @@ function readGuest(): Loadout {
       inventory: Array.isArray(j.inventory) ? j.inventory.filter(isWeaponId) : def.inventory,
       storage: Array.isArray(j.storage) ? j.storage.filter(isWeaponId) : def.storage,
       hotbar: (Array.isArray(j.hotbar) ? j.hotbar.filter(isWeaponId) : def.hotbar).slice(0, MAX_HOTBAR),
+      gear: sanitizeGear(j.gear),
     };
   } catch {
     return defaultLoadout();
@@ -67,9 +72,10 @@ export function useLoadout(userId: string | null) {
       return {
         killPoints: profile.kill_points,
         upgrades: profile.upgrades,
-        inventory: profile.hotbar.slice(0, MAX_HOTBAR),
+        inventory: profile.hotbar.filter((w) => !isGearId(w)).slice(0, MAX_HOTBAR),
         storage: [],
-        hotbar: profile.hotbar.slice(0, MAX_HOTBAR),
+        hotbar: profile.hotbar.filter((w) => !isGearId(w)).slice(0, MAX_HOTBAR),
+        gear: profile.gear,
       };
     }
     return guest;
@@ -81,7 +87,7 @@ export function useLoadout(userId: string | null) {
     const next: Loadout = { ...loadout, ...patch };
     // Enforce invariants
     // Players carry only their hotbar (max 4 weapons); no storage.
-    next.hotbar = next.hotbar.filter((w, i, a) => a.indexOf(w) === i).slice(0, MAX_HOTBAR);
+    next.hotbar = next.hotbar.filter((w, i, a) => !isGearId(w) && a.indexOf(w) === i).slice(0, MAX_HOTBAR);
     next.inventory = [...next.hotbar].slice(0, MAX_INVENTORY);
     next.storage = [];
     if (next.hotbar.length === 0 && next.inventory.length > 0) {
@@ -95,6 +101,7 @@ export function useLoadout(userId: string | null) {
         inventory: next.inventory,
         storage_weapons: next.storage,
         hotbar: next.hotbar,
+        gear: next.gear,
       });
       refresh();
     } else {
